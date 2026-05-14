@@ -1,0 +1,36 @@
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.VC.db
+*.opensdf
+*.sdf
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# UE 编译产物 / 缓存（每台机器各自重建）
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+
+# 插件中的中间产物
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# 日志与临时文件
+*.log
+*.tlog
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python（UE-MCP 开发时可能产生）
+__pycache__/
+*.pyc
+.venv/
