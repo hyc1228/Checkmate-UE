@@ -10,7 +10,8 @@ public class Checkmate : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput",
-			"UMG"  // For UUserWidget base class
+			"UMG",                                              // For UUserWidget base class
+			"LevelSequence", "MovieScene", "MovieSceneTracks"   // For TwistSequenceManager
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
