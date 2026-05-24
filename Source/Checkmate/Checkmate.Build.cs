@@ -16,6 +16,15 @@ public class Checkmate : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Slate", "SlateCore"  // For FWidgetTransform / advanced UMG features
 		});
+
+		// Editor-only：关卡编辑器 EUW 需要 Blutility（UEditorUtilityWidget）+
+		// UnrealEd（UEditorAssetLibrary / asset save）。Shipping build 不打包。
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] {
+				"Blutility", "UMGEditor", "UnrealEd", "EditorScriptingUtilities"
+			});
+		}
 		
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");
