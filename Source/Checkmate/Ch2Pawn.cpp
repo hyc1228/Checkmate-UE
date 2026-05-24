@@ -167,6 +167,8 @@ bool ACh2Pawn::TryMoveTo(FIntPoint TargetCell)
 	return true;
 }
 
+// 注：MoveDuration 软化（走近 Exit 时变慢）在 NativeTick 里按 EffectiveDuration 计算。
+
 void ACh2Pawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -177,8 +179,27 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 	// 1) Lerp 中：推进动画，结束时触发 Notify
 	if (bMoving)
 	{
+		// sensorium 软化：走近 Exit 时移动变慢（spec 「控制响应轻微软化」）
+		float EffectiveDuration = MoveDuration;
+		if (ACh2GameMode* GM = GetGM())
+		{
+			if (GM->LevelData)
+			{
+				const FIntPoint ExitCell = GM->LevelData->FindCellOfType(ECh2CellType::Exit);
+				if (ExitCell.X >= 0)
+				{
+					const FIntPoint Cur = WorldToCell(MoveEndLoc);
+					const int32 Dist = FMath::Abs(Cur.X - ExitCell.X) + FMath::Abs(Cur.Y - ExitCell.Y);
+					if (Dist <= 3)
+					{
+						const float Soften = 1.0f + (1.0f - Dist / 3.0f) * 0.6f;  // 最近 ×1.6
+						EffectiveDuration = MoveDuration * Soften;
+					}
+				}
+			}
+		}
 		MoveElapsed += DeltaSeconds;
-		const float T = FMath::Clamp(MoveElapsed / MoveDuration, 0.0f, 1.0f);
+		const float T = FMath::Clamp(MoveElapsed / EffectiveDuration, 0.0f, 1.0f);
 		const float Eased = FMath::InterpEaseOut(0.0f, 1.0f, T, 2.0f);
 		// 加一点 hop 弧线（中间略抬起）
 		FVector L = FMath::Lerp(MoveStartLoc, MoveEndLoc, Eased);
