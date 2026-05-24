@@ -3,12 +3,18 @@
 #include "JudgmentCardWidget.h"
 
 #include "CardData.h"
-#include "CardSelectionDragOp.h"
-#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "CardSelectionScreen.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
+#include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+
+namespace
+{
+	constexpr int32 HoverZOrderBoost = 1000;
+}
 
 UJudgmentCardWidget::UJudgmentCardWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -47,6 +53,35 @@ void UJudgmentCardWidget::SetCardData(UCardData* InCardData)
 		LabelText->SetText(CardData->DisplayLabel);
 	}
 
+	if (CardImage)
+	{
+		// 优先用 CardData.IconTexture（玩家拖图进去就自动接管）；没图回退维度色块。
+		UTexture2D* IconTex = CardData->IconTexture.IsNull() ? nullptr : CardData->IconTexture.LoadSynchronous();
+		if (IconTex)
+		{
+			CardImage->SetBrushFromTexture(IconTex, /*bMatchSize=*/false);
+			CardImage->SetColorAndOpacity(FLinearColor::White);
+		}
+		else
+		{
+			// 灰盒占位：按维度配深色 tint。
+			FLinearColor Tint = FLinearColor(0.10f, 0.08f, 0.07f, 1.0f);
+			switch (CardData->Dimension)
+			{
+				case ECardDimension::Posture:    Tint = FLinearColor(0.32f, 0.10f, 0.10f, 1.0f); break;
+				case ECardDimension::Hair:       Tint = FLinearColor(0.20f, 0.13f, 0.08f, 1.0f); break;
+				case ECardDimension::Expression: Tint = FLinearColor(0.30f, 0.24f, 0.10f, 1.0f); break;
+				case ECardDimension::Accessory:  Tint = FLinearColor(0.12f, 0.18f, 0.22f, 1.0f); break;
+			}
+			if (CardData->bIsPearlCompatible)
+			{
+				Tint *= 1.25f;
+				Tint.A = 1.0f;
+			}
+			CardImage->SetColorAndOpacity(Tint);
+		}
+	}
+
 	if (CardMID)
 	{
 		CardMID->SetScalarParameterValue(
@@ -80,13 +115,32 @@ void UJudgmentCardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 	OnTiltUpdated(CurrentTilt, CurrentLift);
 }
 
+namespace
+{
+	float ComputeTargetLift(bool bSelected, bool bHovered, float HoverLift, float SelectLift)
+	{
+		// 选中是 floor lift（永久浮起），hover 可以再多抬一点；取 max 而非相加避免飞太高
+		const float SelLift = bSelected ? SelectLift : 0.0f;
+		const float HovLift = bHovered ? HoverLift : 0.0f;
+		return FMath::Max(SelLift, HovLift);
+	}
+}
+
 void UJudgmentCardWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
 	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
 
+	if (bIsHovered) return;  // 防重入（drag visual 等 corner case）
+
 	bIsHovered = true;
-	TargetLift = HoverLiftPixels;
+	TargetLift = ComputeTargetLift(bIsSelected, true, HoverLiftPixels, SelectedLiftPixels);
 	TargetScale = HoverScaleMultiplier;
+
+	// 把 hover 中的卡顶到最上层
+	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot))
+	{
+		CanvasSlot->SetZOrder(CanvasSlot->GetZOrder() + HoverZOrderBoost);
+	}
 
 	OnHoverStart();
 }
@@ -95,10 +149,18 @@ void UJudgmentCardWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
 {
 	Super::NativeOnMouseLeave(InMouseEvent);
 
+	if (!bIsHovered) return;
+
 	bIsHovered = false;
+	bPressing = false;
 	TargetTilt = FVector2D::ZeroVector;
-	TargetLift = 0.0f;
+	TargetLift = ComputeTargetLift(bIsSelected, false, HoverLiftPixels, SelectedLiftPixels);
 	TargetScale = 1.0f;
+
+	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot))
+	{
+		CanvasSlot->SetZOrder(CanvasSlot->GetZOrder() - HoverZOrderBoost);
+	}
 
 	OnHoverEnd();
 }
@@ -115,44 +177,34 @@ FReply UJudgmentCardWidget::NativeOnMouseMove(const FGeometry& InGeometry, const
 
 FReply UJudgmentCardWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	// 标记此 widget 可以触发 drag —— UE 会在玩家移动鼠标超过阈值后调用 NativeOnDragDetected
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
-		return UWidgetBlueprintLibrary::DetectDragIfPressed(InMouseEvent, this, EKeys::LeftMouseButton).NativeReply;
+		bPressing = true;
+		return FReply::Handled();
 	}
-
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 }
 
-void UJudgmentCardWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation)
+FReply UJudgmentCardWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
-
-	UCardSelectionDragOp* DragOp = NewObject<UCardSelectionDragOp>(this);
-	DragOp->SourceCard = this;
-	DragOp->Payload = this;        // UDragDropOperation 自带的 Payload 字段
-	DragOp->Pivot = EDragPivot::CenterCenter;
-
-	// DefaultDragVisual = 拖拽时跟随光标的视觉。先用本卡 widget 作为 visual（光标会拖着一张卡的副本）
-	DragOp->DefaultDragVisual = this;
-
-	OutOperation = DragOp;
-
-	// hover 状态在 drag 期间保持视觉（卡片浮起）
-	bIsHovered = false;
-	TargetLift = 0.0f;
-	TargetScale = 1.0f;
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bPressing)
+	{
+		bPressing = false;
+		if (OwningScreen)
+		{
+			OwningScreen->HandleCardClicked(this);
+		}
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
-void UJudgmentCardWidget::NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+void UJudgmentCardWidget::SetSelected(bool bInSelected)
 {
-	Super::NativeOnDragCancelled(InDragDropEvent, InOperation);
-
-	// 拖到无效位置 → 视觉回弹（slot/pool 没有 accept，UE 会自动把 widget 还原 parent）
-	bIsHovered = false;
-	TargetTilt = FVector2D::ZeroVector;
-	TargetLift = 0.0f;
-	TargetScale = 1.0f;
+	if (bIsSelected == bInSelected) return;
+	bIsSelected = bInSelected;
+	TargetLift = ComputeTargetLift(bIsSelected, bIsHovered, HoverLiftPixels, SelectedLiftPixels);
+	OnSelectedChanged(bIsSelected);
 }
 
 FVector2D UJudgmentCardWidget::CalculateNormalizedTilt(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) const
@@ -178,7 +230,7 @@ void UJudgmentCardWidget::ApplyTiltToTransform()
 {
 	FWidgetTransform Transform;
 
-	Transform.Angle = -CurrentTilt.X * (MaxTiltAngleDegrees * 0.3f);
+	Transform.Angle = BaseFanAngle + (-CurrentTilt.X * (MaxTiltAngleDegrees * 0.3f));
 	Transform.Shear = FVector2D(
 		-CurrentTilt.Y * MaxShearAmount,
 		-CurrentTilt.X * MaxShearAmount
@@ -187,5 +239,6 @@ void UJudgmentCardWidget::ApplyTiltToTransform()
 	Transform.Scale = FVector2D(CurrentScale, CurrentScale);
 
 	SetRenderTransform(Transform);
-	SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+	// 旋转 pivot 设在底部中心——扇形铺开时卡只绕底边旋转，所有底边保持对齐
+	SetRenderTransformPivot(FVector2D(0.5f, 1.0f));
 }

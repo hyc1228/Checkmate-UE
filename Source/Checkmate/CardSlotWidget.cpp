@@ -8,19 +8,9 @@
 
 bool UCardSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
-	UCardSelectionDragOp* CardOp = Cast<UCardSelectionDragOp>(InOperation);
-	if (!CardOp || !CardOp->SourceCard)
-	{
-		return false;
-	}
-
-	if (OwningScreen)
-	{
-		OwningScreen->HandleCardDroppedOnSlot(CardOp->SourceCard, this);
-	}
-
-	OnDropHighlightEnd();
-	return true;
+	// 已弃用：v0.3 起卡选采用点选 + 浮起模式（CardSelectionScreen::HandleCardClicked），不再走 drag-drop。
+	// 此函数保留为 no-op 以便保留 WBP_CardSlot asset 兼容性，后续清理时连同 .h/.cpp 一并删除。
+	return false;
 }
 
 void UCardSlotWidget::AttachCard(UJudgmentCardWidget* InCard)

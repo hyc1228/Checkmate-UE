@@ -50,6 +50,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Card|Data")
 	void SetOwningScreen(UCardSelectionScreen* InScreen) { OwningScreen = InScreen; }
 
+	// ── 选中状态 ──────────────────────────────────────────────────────────
+
+	/** 由 owning screen 在 click 仲裁后调用。视觉立刻响应（永久浮起 / 落回）。 */
+	UFUNCTION(BlueprintCallable, Category="Card|Selection")
+	void SetSelected(bool bInSelected);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Card|Selection")
+	bool IsSelected() const { return bIsSelected; }
+
+	/** 扇形铺开：每张卡有一个 base 旋转角度（度），叠加在 tilt 之上。Screen 在构造时分配。 */
+	UFUNCTION(BlueprintCallable, Category="Card|Layout")
+	void SetBaseFanAngle(float DegAngle) { BaseFanAngle = DegAngle; }
+
 	// ── 调参旋钮（在 WBP defaults 或 Editor 里调）──────────────────────────────
 
 	/** 最大倾斜角度（度）。Balatro 默认 ~15。太大会显得卡片像在打转。 */
@@ -68,13 +81,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Hover", meta=(ClampMin="1.0", ClampMax="1.5"))
 	float HoverScaleMultiplier = 1.05f;
 
+	/** 被选中时永久上浮像素（Balatro：选中后停留在抬起状态）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Selection", meta=(ClampMin="0.0"))
+	float SelectedLiftPixels = 32.0f;
+
 	/** 平滑插值速度（越大越快回到目标）。10-20 之间感觉跟手。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Smoothing", meta=(ClampMin="1.0", ClampMax="50.0"))
 	float SmoothingSpeed = 14.0f;
-
-	/** 拖拽触发距离（像素）。鼠标按下后移动超过此距离才进入 drag 状态。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Drag", meta=(ClampMin="0.0"))
-	float DragDetectDistance = 5.0f;
 
 	/** Material 参数名（与 M_JudgmentCard_2D 里定义的同名）。可在 WBP 里覆盖。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Material Binding")
@@ -104,6 +117,10 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category="Card|Events")
 	void OnCardDataChanged(UCardData* NewData);
 
+	/** 选中状态切换后触发（WBP 可加发光描边等点缀）。 */
+	UFUNCTION(BlueprintImplementableEvent, Category="Card|Events")
+	void OnSelectedChanged(bool bSelected);
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
@@ -111,8 +128,7 @@ protected:
 	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-	virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
-	virtual void NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
+	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 	/** WBP 中拖一个 Image 进来命名 "CardImage" 并勾 Is Variable。 */
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
@@ -136,6 +152,9 @@ private:
 	float CurrentScale = 1.0f;
 	float TargetScale = 1.0f;
 	bool bIsHovered = false;
+	bool bIsSelected = false;
+	bool bPressing = false;  // 鼠标按下中——up 时若仍 hovered 视为 click
+	float BaseFanAngle = 0.0f;
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* CardMID = nullptr;
