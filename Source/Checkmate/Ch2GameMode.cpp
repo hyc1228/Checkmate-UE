@@ -460,6 +460,21 @@ void ACh2GameMode::SpawnPuppetAt(FIntPoint Cell)
 		MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(1.0f, 0.5f, 0.1f));
 	}
 
+	// 加按扣眼 marker（spec：爆炸玩偶眼睛 = 按扣眼 = 未觉醒的自己）
+	// 在玩偶球顶上 attach 一个小立方体，暗色
+	UStaticMesh* ButtonM = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (ButtonM)
+	{
+		UStaticMeshComponent* EyeBtn = NewObject<UStaticMeshComponent>(A);
+		EyeBtn->SetupAttachment(A->GetRootComponent());
+		EyeBtn->RegisterComponent();
+		EyeBtn->SetStaticMesh(ButtonM);
+		EyeBtn->SetRelativeLocation(FVector(40.0f, 0.0f, 20.0f));
+		EyeBtn->SetRelativeScale3D(FVector(0.15f, 0.15f, 0.15f));
+		EyeBtn->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		EyeBtn->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(0.05f, 0.05f, 0.08f));
+	}
+
 	FCh2PuppetState P;
 	P.Cell = Cell;
 	P.TurnsRemaining = PuppetExplodeAfterTurns;
