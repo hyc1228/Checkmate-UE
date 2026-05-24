@@ -92,7 +92,7 @@ public:
 	// ── 蓝图 hook（用户可在 WBP 里 override）─────────────────────────────────
 
 	UFUNCTION(BlueprintImplementableEvent, Category="Card|Events")
-	void OnTiltUpdated(FVector2D NormalizedTilt, float CurrentLift);
+	void OnTiltUpdated(FVector2D NormalizedTilt, float InCurrentLift);
 
 	UFUNCTION(BlueprintImplementableEvent, Category="Card|Events")
 	void OnHoverStart();

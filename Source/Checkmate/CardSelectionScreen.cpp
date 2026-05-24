@@ -125,9 +125,9 @@ void UCardSelectionScreen::TickCountdown()
 		GetWorld()->GetTimerManager().ClearTimer(CountdownTimerHandle);
 
 		// 自动填充：把池里剩余的卡顺序塞进空 slot（slice spec: 随机自动填充，先用顺序代替）
-		for (UCardSlotWidget* Slot : Slots)
+		for (UCardSlotWidget* SlotWidget : Slots)
 		{
-			if (Slot && Slot->IsEmpty())
+			if (SlotWidget && SlotWidget->IsEmpty())
 			{
 				// 找一个还在 Pool 里（即不在任何 slot 里）的卡
 				for (UJudgmentCardWidget* Card : AllCardWidgets)
@@ -139,7 +139,7 @@ void UCardSelectionScreen::TickCountdown()
 						{
 							CardPoolContainer->RemoveChild(Card);
 						}
-						Slot->AttachCard(Card);
+						SlotWidget->AttachCard(Card);
 						break;
 					}
 				}
@@ -232,11 +232,11 @@ UCardSlotWidget* UCardSelectionScreen::FindSlotHoldingCard(UJudgmentCardWidget* 
 {
 	if (!Card) return nullptr;
 
-	for (UCardSlotWidget* Slot : Slots)
+	for (UCardSlotWidget* SlotWidget : Slots)
 	{
-		if (Slot && Slot->HeldCard == Card)
+		if (SlotWidget && SlotWidget->HeldCard == Card)
 		{
-			return Slot;
+			return SlotWidget;
 		}
 	}
 	return nullptr;
@@ -245,9 +245,9 @@ UCardSlotWidget* UCardSelectionScreen::FindSlotHoldingCard(UJudgmentCardWidget* 
 void UCardSelectionScreen::RefreshBeginShiftEnabled()
 {
 	int32 FilledSlots = 0;
-	for (UCardSlotWidget* Slot : Slots)
+	for (UCardSlotWidget* SlotWidget : Slots)
 	{
-		if (Slot && !Slot->IsEmpty()) FilledSlots++;
+		if (SlotWidget && !SlotWidget->IsEmpty()) FilledSlots++;
 	}
 
 	const bool bShouldEnable = (FilledSlots >= K);
@@ -282,11 +282,11 @@ void UCardSelectionScreen::OnBeginShiftClicked()
 TArray<UCardData*> UCardSelectionScreen::GetAssembledCardData() const
 {
 	TArray<UCardData*> Out;
-	for (UCardSlotWidget* Slot : Slots)
+	for (UCardSlotWidget* SlotWidget : Slots)
 	{
-		if (Slot && Slot->HeldCard)
+		if (SlotWidget && SlotWidget->HeldCard)
 		{
-			UCardData* CardData = Slot->HeldCard->GetCardData();
+			UCardData* CardData = SlotWidget->HeldCard->GetCardData();
 			if (CardData)
 			{
 				Out.Add(CardData);
