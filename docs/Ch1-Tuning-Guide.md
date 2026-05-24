@@ -60,12 +60,33 @@
 
 | 字段 | Category | 默认 | 含义 |
 |---|---|---|---|
-| `K` | Ch1\|Slice\|Tuning | 3 | 一班要选几张卡 |
-| `AssemblyTimerSec` | Ch1\|Slice\|Tuning | 30 | 选卡屏倒计时（秒） |
-| `ShiftPoolCards` | Ch1\|Slice\|Data | 13 张 | **加/减卡 → 在此数组增删条目，拖 DA_Card_* 入** |
-| `ShiftDollSequence` | Ch1\|Slice\|Data | 3 只 | 一班要审 N 只娃娃，依序入场 |
-| `CardSelectionWidgetClass` | Ch1\|Slice | WBP_CardSelectionScreen | 用哪个选卡屏 |
-| `InspectionWidgetClass` | Ch1\|Slice | WBP_InspectionScreen | 用哪个检验屏 |
+| `Shifts` | Ch1\|Shifts | 4 条 | **多班次配置**——每条是一个 FShiftConfig（见下） |
+| `TransitionHoldSeconds` | Ch1\|Shifts | 2.5 | 班次间「班次 X」过场停留秒数 |
+| `CardSelectionWidgetClass` | Ch1\|Classes | WBP_CardSelectionScreen | 用哪个选卡屏 |
+| `InspectionWidgetClass` | Ch1\|Classes | WBP_InspectionScreen | 用哪个检验屏 |
+| `ShiftTransitionWidgetClass` | Ch1\|Classes | WBP_ShiftTransition | 用哪个过场（黑屏 + 「班次 X」） |
+
+**`Shifts` 每条（FShiftConfig）字段：**
+
+| 字段 | 含义 |
+|---|---|
+| `PoolCards` | 这一班的卡池（拖 DA_Card_* 进去） |
+| `DollSequence` | 这一班的娃娃池（循环抽取，不是「过完即结束」） |
+| `K` | 玩家要选几张卡 |
+| `CorrectGoal` | **核心节奏**——本班需正确判定多少次才下班（错的不计数继续抽） |
+| `AssemblyTimerSec` | 选卡屏倒计时（默认 30） |
+| `DollTimeoutSec` | 每只娃娃超时（≤0 = 无超时；Shift 3+ 推荐 6-8 秒） |
+
+**默认 4 班升级曲线**（按 v0.4 平衡调整）：
+
+| Shift | N (Pool) | K | CorrectGoal | Timeout | 体感 |
+|---|---|---|---|---|---|
+| 1 | 3 | 3 | 3 | 0 | 教学，几乎不会错 |
+| 2 | 5 | 3 | 4 | 0 | 选择空间，开始撞错 |
+| 3 | 7 | 4 | 5 | 8s | 时间压力，命中率下降 |
+| 4 | 13 | 5 | 6 | 6s | 标准严苛，大量丢弃才能凑齐 |
+
+> 「`CorrectGoal` 而非过完池」是 v0.4 关键改动：后期 K 高 → 卡组要求严苛 → 大部分娃娃需丢弃 → 玩家被迫做大量「丢弃」动作，符合「越后期玩家丢的越多」的预期手感。
 
 ### B. 扇形布局 → `WBP_CardSelectionScreen` 的 Class Defaults
 
@@ -80,6 +101,20 @@
 | `CardWidgetClass` | CardSelection\|Classes | WBP_JudgmentCard | 一般不动 |
 
 > 改 `CardWidth/Height` 后**也要**进 `WBP_JudgmentCard` 把根 `SizeBox`（叫 `CardSize`）的 Width/Height Override 改成一致 —— 否则 C++ 给的 slot 尺寸跟 widget 自报的 desired size 不一致，hit-test 区域会偏。
+
+### B-2. 检验屏反馈 juice → `WBP_InspectionScreen` 的 Class Defaults
+
+打开 `/Game/Ch1/UI/WBP_InspectionScreen`，`Class Defaults`：
+
+| 字段 | Category | 默认 | 用途 |
+|---|---|---|---|
+| `CorrectFlashColor` | Inspection\|Feedback | 绿 (0.2, 0.9, 0.4) | 判对时全屏闪屏颜色 |
+| `WrongFlashColor` | Inspection\|Feedback | 红 (0.95, 0.25, 0.25) | 判错时全屏闪屏颜色 |
+| `FlashPeakAlpha` | Inspection\|Feedback | 0.45 | 闪屏峰值不透明度（0-1） |
+| `FlashDurationSec` | Inspection\|Feedback | 0.35 | 闪屏总时长 |
+| `WrongShakeAmplitude` | Inspection\|Feedback | 14 | 错误震屏振幅（像素）；正确震 1/3 |
+| `ShakeDurationSec` | Inspection\|Feedback | 0.30 | 震屏时长 |
+| `ToastHoldSeconds` | Inspection\|Tuning | 1.0 | toast 文字停留 |
 
 ### C. 单卡动效 → `WBP_JudgmentCard` 的 Class Defaults
 
@@ -175,11 +210,12 @@ UBT 命令行（自动化）：
 │   └── BP_Chapter1GameMode        # 整循环入口；World Settings → GameMode Override 设这个
 ├── Data/
 │   ├── Cards/                     # 13 张 DA_Card_*
-│   └── Dolls/                     # 3 只 DA_Doll_*
+│   └── Dolls/                     # 3 只 DA_Doll_*（v0.4：池，循环抽取）
 ├── UI/
 │   ├── WBP_CardSelectionScreen    # 选卡屏（含 13 卡扇形布局）
 │   ├── WBP_JudgmentCard           # 单卡 widget（hover/tilt/select）
-│   ├── WBP_InspectionScreen       # 检验屏（Pass/Reject + toast）
+│   ├── WBP_InspectionScreen       # 检验屏（Pass/Reject + 反馈闪屏/震屏）
+│   ├── WBP_ShiftTransition        # 班次间过场（黑屏 + 「班次 X」字幕）
 │   └── WBP_CardSlot               # ★ 已弃用（v0.3 起改点选模式，此 WBP 不再被引用）
 └── Maps/
     └── Ch1Test                    # 测试关；World Settings 指 BP_Chapter1GameMode

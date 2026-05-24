@@ -6,6 +6,7 @@
 #include "DollData.h"
 #include "JudgmentEvaluator.h"
 
+#include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "TimerManager.h"
@@ -66,9 +67,28 @@ void UInspectionScreen::NativeConstruct()
 		ToastText->SetText(FText::GetEmpty());
 	}
 
+	// FlashOverlay 初始不可见
+	if (FlashOverlay)
+	{
+		FLinearColor C = FlashOverlay->GetContentColorAndOpacity();
+		C.A = 0.0f;
+		FlashOverlay->SetContentColorAndOpacity(C);
+		FlashOverlay->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
+
 	RenderJudgmentCardsList();
 	RenderCurrentDoll();
 	RenderProgress();
+
+	// 启动第一只娃娃的 timeout（若配置）
+	if (DollTimeoutSec > 0.0f)
+	{
+		CurrentDollTimeRemaining = DollTimeoutSec;
+		GetWorld()->GetTimerManager().SetTimer(
+			DollTimeoutHandle,
+			FTimerDelegate::CreateUObject(this, &UInspectionScreen::HandleDollTimeout),
+			DollTimeoutSec, false);
+	}
 }
 
 void UInspectionScreen::NativeDestruct()
@@ -76,12 +96,65 @@ void UInspectionScreen::NativeDestruct()
 	if (GetWorld())
 	{
 		GetWorld()->GetTimerManager().ClearTimer(AdvanceTimerHandle);
+		GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
 	}
 
 	if (PassButton)   PassButton->OnClicked.RemoveAll(this);
 	if (RejectButton) RejectButton->OnClicked.RemoveAll(this);
 
 	Super::NativeDestruct();
+}
+
+void UInspectionScreen::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	// 闪屏衰减：sin(π·t/T) 半周期——0 涨到峰值再回 0
+	if (FlashOverlay && FlashTotal > 0.0f)
+	{
+		FlashElapsed += InDeltaTime;
+		if (FlashElapsed >= FlashTotal)
+		{
+			FlashTotal = 0.0f;
+			FLinearColor C = FlashTargetColor;
+			C.A = 0.0f;
+			FlashOverlay->SetContentColorAndOpacity(C);
+		}
+		else
+		{
+			const float Phase = FlashElapsed / FlashTotal;
+			const float Alpha = FMath::Sin(Phase * PI) * FlashPeakAlpha;
+			FLinearColor C = FlashTargetColor;
+			C.A = Alpha;
+			FlashOverlay->SetContentColorAndOpacity(C);
+		}
+	}
+
+	// 震屏：sin 衰减 — 振幅按时间线性递减
+	if (ShakeTotal > 0.0f)
+	{
+		ShakeElapsed += InDeltaTime;
+		if (ShakeElapsed >= ShakeTotal)
+		{
+			ShakeTotal = 0.0f;
+			SetRenderTranslation(FVector2D::ZeroVector);
+		}
+		else
+		{
+			const float DecayT = 1.0f - (ShakeElapsed / ShakeTotal);
+			const float Freq = 35.0f;  // Hz
+			const float OffsetX = FMath::Sin(ShakeElapsed * Freq) * ShakeAmplitude * DecayT;
+			const float OffsetY = FMath::Cos(ShakeElapsed * (Freq * 1.3f)) * ShakeAmplitude * DecayT * 0.6f;
+			SetRenderTranslation(FVector2D(OffsetX, OffsetY));
+		}
+	}
+
+	// 倒计时数字（Shift 3+）
+	if (DollTimerText && DollTimeoutSec > 0.0f && !bAwaitingNext)
+	{
+		CurrentDollTimeRemaining = FMath::Max(0.0f, CurrentDollTimeRemaining - InDeltaTime);
+		DollTimerText->SetText(FText::AsNumber(FMath::CeilToInt(CurrentDollTimeRemaining)));
+	}
 }
 
 void UInspectionScreen::OnPassClicked()
@@ -98,12 +171,13 @@ void UInspectionScreen::OnRejectClicked()
 
 void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 {
-	if (!DollSequence.IsValidIndex(CurrentDollIndex))
+	if (DollSequence.Num() == 0)
 	{
 		return;
 	}
 
-	const UDollData* Doll = DollSequence[CurrentDollIndex];
+	const int32 PoolIdx = CurrentDollIndex % DollSequence.Num();
+	const UDollData* Doll = DollSequence[PoolIdx];
 
 	FString FailReason;
 	const EJudgmentVerdict GroundTruth = UJudgmentEvaluator::EvaluateDoll(JudgmentCards, Doll, FailReason);
@@ -132,8 +206,16 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 		ToastText->SetText(FText::FromString(Toast));
 	}
 
+	StartFeedback(bPlayerCorrect);
+
 	bAwaitingNext = true;
 	SetButtonsEnabled(false);
+
+	// 取消本只娃娃的 timeout（玩家已做出选择）
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
+	}
 
 	if (GetWorld())
 	{
@@ -145,9 +227,29 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 	}
 }
 
+void UInspectionScreen::StartFeedback(bool bCorrect)
+{
+	// 闪屏
+	FlashElapsed = 0.0f;
+	FlashTotal = FlashDurationSec;
+	FlashTargetColor = bCorrect ? CorrectFlashColor : WrongFlashColor;
+
+	// 震屏（正确弱 / 错误强）
+	ShakeElapsed = 0.0f;
+	ShakeTotal = ShakeDurationSec;
+	ShakeAmplitude = bCorrect ? (WrongShakeAmplitude * 0.33f) : WrongShakeAmplitude;
+}
+
+void UInspectionScreen::HandleDollTimeout()
+{
+	if (bAwaitingNext) return;
+	// 超时 = 强制丢弃（与 GDD 一致：FalseNeg 若合规 / TrueNeg 若不合规）
+	HandlePlayerChoice(/*bPlayerChosePass=*/false);
+}
+
 void UInspectionScreen::AdvanceToNextDoll()
 {
-	CurrentDollIndex++;
+	CurrentDollIndex++;  // 处理过的总数（含错误 + 超时）
 	bAwaitingNext = false;
 
 	if (ToastText)
@@ -155,10 +257,11 @@ void UInspectionScreen::AdvanceToNextDoll()
 		ToastText->SetText(FText::GetEmpty());
 	}
 
-	if (CurrentDollIndex >= DollSequence.Num())
+	// 班次终止条件：正确次数达标（不是过完池）
+	if (CorrectCount >= CorrectGoal)
 	{
 		FShiftResult Result;
-		Result.TotalDolls = DollSequence.Num();
+		Result.TotalDolls = CurrentDollIndex;  // 总处理数
 		Result.CorrectCount = CorrectCount;
 		Result.WrongCount = WrongCount;
 
@@ -170,6 +273,16 @@ void UInspectionScreen::AdvanceToNextDoll()
 	SetButtonsEnabled(true);
 	RenderCurrentDoll();
 	RenderProgress();
+
+	// 启动下一只娃娃的 timeout（若有）
+	if (DollTimeoutSec > 0.0f && GetWorld())
+	{
+		CurrentDollTimeRemaining = DollTimeoutSec;
+		GetWorld()->GetTimerManager().SetTimer(
+			DollTimeoutHandle,
+			FTimerDelegate::CreateUObject(this, &UInspectionScreen::HandleDollTimeout),
+			DollTimeoutSec, false);
+	}
 }
 
 void UInspectionScreen::RenderJudgmentCardsList()
@@ -194,13 +307,15 @@ void UInspectionScreen::RenderCurrentDoll()
 {
 	if (!DollAttributeText) return;
 
-	if (!DollSequence.IsValidIndex(CurrentDollIndex))
+	if (DollSequence.Num() == 0)
 	{
-		DollAttributeText->SetText(FText::FromString(TEXT("(无娃娃)")));
+		DollAttributeText->SetText(FText::FromString(TEXT("(无娃娃池)")));
 		return;
 	}
 
-	const UDollData* Doll = DollSequence[CurrentDollIndex];
+	// 池循环：从 CurrentDollIndex 取余
+	const int32 PoolIdx = CurrentDollIndex % DollSequence.Num();
+	const UDollData* Doll = DollSequence[PoolIdx];
 	if (!Doll)
 	{
 		DollAttributeText->SetText(FText::FromString(TEXT("(空 doll data)")));
@@ -224,9 +339,10 @@ void UInspectionScreen::RenderProgress()
 {
 	if (!ProgressText) return;
 
-	const int32 OneBased = FMath::Min(CurrentDollIndex + 1, DollSequence.Num());
+	// 进度 = 「正确 / 目标」，强调玩家要凑正确数而非过完池
 	ProgressText->SetText(FText::FromString(
-		FString::Printf(TEXT("%d / %d"), OneBased, DollSequence.Num())
+		FString::Printf(TEXT("正确 %d / %d   （处理 %d 只，丢错 %d）"),
+			CorrectCount, CorrectGoal, CurrentDollIndex, WrongCount)
 	));
 }
 

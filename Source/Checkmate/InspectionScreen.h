@@ -10,6 +10,7 @@ class UCardData;
 class UDollData;
 class UTextBlock;
 class UButton;
+class UBorder;
 
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
@@ -68,9 +69,44 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0.1"))
 	float ToastHoldSeconds = 1.0f;
 
+	/** 每只娃娃超时（秒）。<=0 表示无超时（Shift 1-2）。GameMode 按班次配置改写。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0.0"))
+	float DollTimeoutSec = 0.0f;
+
+	/** 本班需要正确判定多少次才下班。GameMode 按班次配置改写。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="1"))
+	int32 CorrectGoal = 3;
+
+	// ── 反馈 juice 参数 ────────────────────────────────────────────────────
+
+	/** 正确闪屏颜色（绿调）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback")
+	FLinearColor CorrectFlashColor = FLinearColor(0.2f, 0.9f, 0.4f, 1.0f);
+
+	/** 错误闪屏颜色（红调）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback")
+	FLinearColor WrongFlashColor = FLinearColor(0.95f, 0.25f, 0.25f, 1.0f);
+
+	/** 闪屏峰值不透明度（0-1）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float FlashPeakAlpha = 0.45f;
+
+	/** 闪屏总时长（秒）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.05"))
+	float FlashDurationSec = 0.35f;
+
+	/** 错误震屏振幅（像素），正确震屏用 1/3。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.0"))
+	float WrongShakeAmplitude = 14.0f;
+
+	/** 震屏时长（秒）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.05"))
+	float ShakeDurationSec = 0.30f;
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UTextBlock* JudgmentCardListText = nullptr;
@@ -89,6 +125,14 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UButton* RejectButton = nullptr;
+
+	/** 全屏闪屏 overlay（Border，覆盖整屏）。WBP 里命名 FlashOverlay，可选。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UBorder* FlashOverlay = nullptr;
+
+	/** 倒计时显示（用于 Shift 3+ 的 DollTimeoutSec）。可选。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* DollTimerText = nullptr;
 
 	UFUNCTION()
 	void OnPassClicked();
@@ -109,6 +153,16 @@ private:
 	bool bAwaitingNext = false;
 
 	FTimerHandle AdvanceTimerHandle;
+	FTimerHandle DollTimeoutHandle;
+	float CurrentDollTimeRemaining = 0.0f;
+
+	// 反馈状态（NativeTick 驱动衰减）
+	float FlashElapsed = 0.0f;
+	float FlashTotal = 0.0f;
+	FLinearColor FlashTargetColor = FLinearColor::White;
+	float ShakeElapsed = 0.0f;
+	float ShakeTotal = 0.0f;
+	float ShakeAmplitude = 0.0f;
 
 	void RenderJudgmentCardsList();
 	void RenderCurrentDoll();
@@ -116,4 +170,7 @@ private:
 	void HandlePlayerChoice(bool bPlayerChosePass);
 	void AdvanceToNextDoll();
 	void SetButtonsEnabled(bool bEnabled);
+
+	void StartFeedback(bool bCorrect);
+	void HandleDollTimeout();
 };
