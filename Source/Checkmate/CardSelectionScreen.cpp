@@ -3,6 +3,7 @@
 #include "CardSelectionScreen.h"
 
 #include "CardData.h"
+#include "Ch1LocSubsystem.h"
 #include "JudgmentCardWidget.h"
 
 #include "Components/Button.h"
@@ -10,6 +11,8 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "TimerManager.h"
 
 void UCardSelectionScreen::SetShiftConfig(const TArray<UCardData*>& InPoolCards, int32 InK, float InAssemblyTimerSec)
@@ -89,16 +92,22 @@ void UCardSelectionScreen::NativeConstruct()
 		OnBeginShiftButtonEnableChanged(false);
 	}
 
-	if (GetWorld())
+	if (LangToggleButton)
 	{
-		TimeRemaining = AssemblyTimerSec;
-		GetWorld()->GetTimerManager().SetTimer(
-			CountdownTimerHandle,
-			FTimerDelegate::CreateUObject(this, &UCardSelectionScreen::TickCountdown),
-			0.1f, true
-		);
+		LangToggleButton->OnClicked.AddDynamic(this, &UCardSelectionScreen::OnLangToggleClicked);
 	}
 
+	if (TimerLabel)
+	{
+		TimerLabel->SetText(FText::FromString(TEXT("—")));
+	}
+
+	// 订阅语言切换 → 重 push 文本
+	if (UCh1LocSubsystem* Loc = GetLoc())
+	{
+		LangChangedHandle = Loc->OnLanguageChanged.AddUObject(this, &UCardSelectionScreen::RefreshLocalizedTexts);
+	}
+	RefreshLocalizedTexts();
 	RefreshConfirmEnabled();
 }
 
@@ -113,8 +122,65 @@ void UCardSelectionScreen::NativeDestruct()
 	{
 		BeginShiftButton->OnClicked.RemoveAll(this);
 	}
+	if (LangToggleButton)
+	{
+		LangToggleButton->OnClicked.RemoveAll(this);
+	}
+
+	if (UCh1LocSubsystem* Loc = GetLoc())
+	{
+		Loc->OnLanguageChanged.Remove(LangChangedHandle);
+	}
 
 	Super::NativeDestruct();
+}
+
+UCh1LocSubsystem* UCardSelectionScreen::GetLoc() const
+{
+	if (UWorld* W = GetWorld())
+	{
+		if (UGameInstance* GI = W->GetGameInstance())
+		{
+			return GI->GetSubsystem<UCh1LocSubsystem>();
+		}
+	}
+	return nullptr;
+}
+
+void UCardSelectionScreen::RefreshLocalizedTexts()
+{
+	UCh1LocSubsystem* Loc = GetLoc();
+	if (!Loc) return;
+
+	if (HeaderText)
+	{
+		HeaderText->SetText(FText::Format(Loc->Get(TEXT("CardSelection.Header")), FText::AsNumber(K)));
+	}
+	if (CounterText)
+	{
+		CounterText->SetText(FText::Format(
+			Loc->Get(TEXT("CardSelection.Counter")),
+			FText::AsNumber(SelectedCards.Num()), FText::AsNumber(K)));
+	}
+	if (BeginShiftLabel)
+	{
+		BeginShiftLabel->SetText(Loc->Get(TEXT("CardSelection.Confirm")));
+	}
+	if (LangToggleLabel)
+	{
+		// 按钮显示切换后的语言名（便于发现"再点这个会变成 X"）
+		const ECh1Language Next = (Loc->GetLanguage() == ECh1Language::ZhCN)
+			? ECh1Language::EnUS : ECh1Language::ZhCN;
+		LangToggleLabel->SetText(FText::FromString(Next == ECh1Language::EnUS ? TEXT("EN") : TEXT("中")));
+	}
+}
+
+void UCardSelectionScreen::OnLangToggleClicked()
+{
+	if (UCh1LocSubsystem* Loc = GetLoc())
+	{
+		Loc->ToggleLanguage();
+	}
 }
 
 void UCardSelectionScreen::TickCountdown()
@@ -184,6 +250,16 @@ void UCardSelectionScreen::RefreshConfirmEnabled()
 	{
 		BeginShiftButton->SetIsEnabled(bShouldEnable);
 		OnBeginShiftButtonEnableChanged(bShouldEnable);
+	}
+	// 计数变了也更新 CounterText
+	if (UCh1LocSubsystem* Loc = GetLoc())
+	{
+		if (CounterText)
+		{
+			CounterText->SetText(FText::Format(
+				Loc->Get(TEXT("CardSelection.Counter")),
+				FText::AsNumber(SelectedCards.Num()), FText::AsNumber(K)));
+		}
 	}
 }
 

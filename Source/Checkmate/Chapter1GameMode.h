@@ -11,6 +11,8 @@ class UCardSelectionScreen;
 class UCardData;
 class UDollData;
 class UUserWidget;
+class ADollDisplay;
+class UCh1LocStrings;
 
 /**
  * 单个班次配置。在 BP_Chapter1GameMode.Shifts 数组里逐条填。
@@ -76,6 +78,18 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
 	TSubclassOf<UUserWidget> ShiftTransitionWidgetClass;
 
+	/** 3D 娃娃 actor class（继承 ADollDisplay；可在 BP_DollDisplay 调 mesh / 颜色等）。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
+	TSubclassOf<ADollDisplay> DollActorClass;
+
+	/** 3D 娃娃 spawn 位置（世界坐标）。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene")
+	FTransform DollSpawnTransform = FTransform(FRotator::ZeroRotator, FVector(0.0f, 0.0f, 100.0f));
+
+	/** 本地化字典 asset（拖 DA_Ch1Loc 进来）。BeginPlay 注入到 UCh1LocSubsystem。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
+	UCh1LocStrings* LocStringsAsset = nullptr;
+
 	/** 班次列表。按 index 顺序依次跑。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Shifts")
 	TArray<FShiftConfig> Shifts;
@@ -96,6 +110,9 @@ private:
 
 	UPROPERTY()
 	UUserWidget* ActiveTransitionScreen = nullptr;
+
+	UPROPERTY()
+	ADollDisplay* ActiveDollActor = nullptr;
 
 	int32 CurrentShiftIdx = 0;
 

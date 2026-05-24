@@ -11,6 +11,7 @@ class UJudgmentCardWidget;
 class UPanelWidget;
 class UButton;
 class UTextBlock;
+class UCh1LocSubsystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAssemblyComplete, const TArray<UCardData*>&, SelectedCards);
 
@@ -95,8 +96,30 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UButton* BeginShiftButton = nullptr;
 
+	/** 显示「本班需选 K 张」。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* HeaderText = nullptr;
+
+	/** 显示「已选 X / K」。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* CounterText = nullptr;
+
+	/** Begin Shift 按钮上的文字（本地化驱动）。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* BeginShiftLabel = nullptr;
+
+	/** 语言切换按钮（中 ↔ EN）。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UButton* LangToggleButton = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* LangToggleLabel = nullptr;
+
 	UFUNCTION()
 	void OnBeginShiftClicked();
+
+	UFUNCTION()
+	void OnLangToggleClicked();
 
 	/** WBP 可 override：班次开始按钮的 enable/disable 视觉反馈。 */
 	UFUNCTION(BlueprintImplementableEvent, Category="CardSelection|Events")
@@ -123,4 +146,11 @@ private:
 
 	/** 根据 SelectedCards.Num() 刷新 Confirm 按钮可点状态。 */
 	void RefreshConfirmEnabled();
+
+	/** 本地化文本 push（OnLanguageChanged 时调）。 */
+	void RefreshLocalizedTexts();
+
+	UCh1LocSubsystem* GetLoc() const;
+
+	FDelegateHandle LangChangedHandle;
 };

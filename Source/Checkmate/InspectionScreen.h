@@ -11,6 +11,8 @@ class UDollData;
 class UTextBlock;
 class UButton;
 class UBorder;
+class ADollDisplay;
+class UCh1LocSubsystem;
 
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
@@ -60,6 +62,22 @@ public:
 	/** GameMode 在 AddToViewport 前调用。 */
 	UFUNCTION(BlueprintCallable, Category="Inspection")
 	void SetShiftData(const TArray<UCardData*>& InJudgmentCards, const TArray<UDollData*>& InDollSequence);
+
+	/** GameMode 在 spawn 完 3D 娃娃 actor 后调用，把 actor 引用交给本 screen。 */
+	UFUNCTION(BlueprintCallable, Category="Inspection")
+	void SetDollActor(ADollDisplay* InActor);
+
+	/** ADollDisplay 在手势确认/丢弃瞬间调（早事件，立即触发评估 + 反馈）。 */
+	void HandleGestureFromDoll(bool bConfirm);
+
+	/** ADollDisplay 动画播完时调（晚事件，触发推进下一只或下班）。 */
+	void OnDollAnimComplete();
+
+	/** ADollDisplay 在玩家做出「扔」动作的瞬间调（独立于评估）—— 触发轻微震 + 风声占位。 */
+	void PlayTossActionFeedback();
+
+	/** ADollDisplay 在印章砸到娃娃的瞬间调 —— 触发强震 + 冲击。 */
+	void PlayStampImpactFeedback();
 
 	/** 班次结束时广播。 */
 	UPROPERTY(BlueprintAssignable, Category="Inspection")
@@ -120,10 +138,11 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UTextBlock* ToastText = nullptr;
 
-	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
+	/** v0.5：UI 按钮废弃，留 BindWidgetOptional 兼容旧 WBP；3D 手势已替代。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UButton* PassButton = nullptr;
 
-	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UButton* RejectButton = nullptr;
 
 	/** 全屏闪屏 overlay（Border，覆盖整屏）。WBP 里命名 FlashOverlay，可选。 */
@@ -133,6 +152,19 @@ protected:
 	/** 倒计时显示（用于 Shift 3+ 的 DollTimeoutSec）。可选。 */
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UTextBlock* DollTimerText = nullptr;
+
+	/** 显示「还需正确 N 只」等班次目标信息。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* RemainingText = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UButton* LangToggleButton = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* LangToggleLabel = nullptr;
+
+	UFUNCTION()
+	void OnLangToggleClicked();
 
 	UFUNCTION()
 	void OnPassClicked();
@@ -146,6 +178,9 @@ private:
 
 	UPROPERTY()
 	TArray<UDollData*> DollSequence;
+
+	UPROPERTY()
+	ADollDisplay* DollActor = nullptr;
 
 	int32 CurrentDollIndex = 0;
 	int32 CorrectCount = 0;
@@ -173,4 +208,10 @@ private:
 
 	void StartFeedback(bool bCorrect);
 	void HandleDollTimeout();
+	void PushCurrentDollToActor();
+
+	void RefreshLocalizedTexts();
+	UCh1LocSubsystem* GetLoc() const;
+
+	FDelegateHandle LangChangedHandle;
 };

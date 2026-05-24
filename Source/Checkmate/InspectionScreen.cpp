@@ -3,12 +3,16 @@
 #include "InspectionScreen.h"
 
 #include "CardData.h"
+#include "Ch1LocSubsystem.h"
 #include "DollData.h"
+#include "DollDisplay.h"
 #include "JudgmentEvaluator.h"
 
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "TimerManager.h"
 
 namespace
@@ -49,6 +53,52 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	bAwaitingNext = false;
 }
 
+void UInspectionScreen::SetDollActor(ADollDisplay* InActor)
+{
+	DollActor = InActor;
+	if (DollActor)
+	{
+		DollActor->SetOwningScreen(this);
+		PushCurrentDollToActor();
+	}
+}
+
+void UInspectionScreen::PushCurrentDollToActor()
+{
+	if (!DollActor || DollSequence.Num() == 0) return;
+	const int32 PoolIdx = CurrentDollIndex % DollSequence.Num();
+	DollActor->ApplyDollData(DollSequence[PoolIdx]);
+}
+
+void UInspectionScreen::HandleGestureFromDoll(bool bConfirm)
+{
+	if (bAwaitingNext) return;
+	// bConfirm == true → 玩家选择放行；false → 丢弃
+	HandlePlayerChoice(/*bPlayerChosePass=*/bConfirm);
+}
+
+void UInspectionScreen::OnDollAnimComplete()
+{
+	// 动画结束 = 推进时刻
+	AdvanceToNextDoll();
+}
+
+void UInspectionScreen::PlayTossActionFeedback()
+{
+	// 单纯震屏，不带 flash（flash 由 HandlePlayerChoice 触发，颜色取决于对错）
+	ShakeElapsed = 0.0f;
+	ShakeTotal = ShakeDurationSec * 0.7f;
+	ShakeAmplitude = WrongShakeAmplitude * 0.6f;
+}
+
+void UInspectionScreen::PlayStampImpactFeedback()
+{
+	// 印章砸下：强震，模拟「啪嗒」一下
+	ShakeElapsed = 0.0f;
+	ShakeTotal = ShakeDurationSec * 1.2f;
+	ShakeAmplitude = WrongShakeAmplitude * 1.3f;
+}
+
 void UInspectionScreen::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -67,18 +117,26 @@ void UInspectionScreen::NativeConstruct()
 		ToastText->SetText(FText::GetEmpty());
 	}
 
-	// FlashOverlay 初始不可见
+	// FlashOverlay 初始透明
 	if (FlashOverlay)
 	{
-		FLinearColor C = FlashOverlay->GetContentColorAndOpacity();
-		C.A = 0.0f;
-		FlashOverlay->SetContentColorAndOpacity(C);
+		FlashOverlay->SetBrushColor(FLinearColor(0, 0, 0, 0));
 		FlashOverlay->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
+
+	if (LangToggleButton)
+	{
+		LangToggleButton->OnClicked.AddDynamic(this, &UInspectionScreen::OnLangToggleClicked);
+	}
+	if (UCh1LocSubsystem* Loc = GetLoc())
+	{
+		LangChangedHandle = Loc->OnLanguageChanged.AddUObject(this, &UInspectionScreen::RefreshLocalizedTexts);
 	}
 
 	RenderJudgmentCardsList();
 	RenderCurrentDoll();
 	RenderProgress();
+	RefreshLocalizedTexts();
 
 	// 启动第一只娃娃的 timeout（若配置）
 	if (DollTimeoutSec > 0.0f)
@@ -101,24 +159,64 @@ void UInspectionScreen::NativeDestruct()
 
 	if (PassButton)   PassButton->OnClicked.RemoveAll(this);
 	if (RejectButton) RejectButton->OnClicked.RemoveAll(this);
+	if (LangToggleButton) LangToggleButton->OnClicked.RemoveAll(this);
+
+	if (UCh1LocSubsystem* Loc = GetLoc())
+	{
+		Loc->OnLanguageChanged.Remove(LangChangedHandle);
+	}
 
 	Super::NativeDestruct();
+}
+
+UCh1LocSubsystem* UInspectionScreen::GetLoc() const
+{
+	if (UWorld* W = GetWorld())
+	{
+		if (UGameInstance* GI = W->GetGameInstance())
+		{
+			return GI->GetSubsystem<UCh1LocSubsystem>();
+		}
+	}
+	return nullptr;
+}
+
+void UInspectionScreen::RefreshLocalizedTexts()
+{
+	UCh1LocSubsystem* Loc = GetLoc();
+	if (!Loc) return;
+
+	// Progress / Stats / Remaining 都重 render（用到 CorrectCount / Goal / WrongCount 等数值）
+	RenderProgress();
+
+	if (LangToggleLabel)
+	{
+		const ECh1Language Next = (Loc->GetLanguage() == ECh1Language::ZhCN)
+			? ECh1Language::EnUS : ECh1Language::ZhCN;
+		LangToggleLabel->SetText(FText::FromString(Next == ECh1Language::EnUS ? TEXT("EN") : TEXT("中")));
+	}
+}
+
+void UInspectionScreen::OnLangToggleClicked()
+{
+	if (UCh1LocSubsystem* Loc = GetLoc())
+	{
+		Loc->ToggleLanguage();
+	}
 }
 
 void UInspectionScreen::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	// 闪屏衰减：sin(π·t/T) 半周期——0 涨到峰值再回 0
+	// 闪屏衰减：sin(π·t/T) 半周期——0 涨到峰值再回 0。用 SetBrushColor 才动 Border 自身颜色。
 	if (FlashOverlay && FlashTotal > 0.0f)
 	{
 		FlashElapsed += InDeltaTime;
 		if (FlashElapsed >= FlashTotal)
 		{
 			FlashTotal = 0.0f;
-			FLinearColor C = FlashTargetColor;
-			C.A = 0.0f;
-			FlashOverlay->SetContentColorAndOpacity(C);
+			FlashOverlay->SetBrushColor(FLinearColor(0, 0, 0, 0));
 		}
 		else
 		{
@@ -126,7 +224,7 @@ void UInspectionScreen::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 			const float Alpha = FMath::Sin(Phase * PI) * FlashPeakAlpha;
 			FLinearColor C = FlashTargetColor;
 			C.A = Alpha;
-			FlashOverlay->SetContentColorAndOpacity(C);
+			FlashOverlay->SetBrushColor(C);
 		}
 	}
 
@@ -217,7 +315,10 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 		GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
 	}
 
-	if (GetWorld())
+	// 推进路径：
+	//   - 有 DollActor → 由其 ApplyDollData/OnDollAnimComplete 驱动推进（动画时长 = 节奏）
+	//   - 没 DollActor（旧 UI 按钮 fallback）→ 用 ToastHoldSeconds 定时器
+	if (!DollActor && GetWorld())
 	{
 		GetWorld()->GetTimerManager().SetTimer(
 			AdvanceTimerHandle,
@@ -243,8 +344,15 @@ void UInspectionScreen::StartFeedback(bool bCorrect)
 void UInspectionScreen::HandleDollTimeout()
 {
 	if (bAwaitingNext) return;
-	// 超时 = 强制丢弃（与 GDD 一致：FalseNeg 若合规 / TrueNeg 若不合规）
-	HandlePlayerChoice(/*bPlayerChosePass=*/false);
+	// 超时 = 强制丢弃（GDD：超时 = 系统默认怀疑）
+	if (DollActor)
+	{
+		DollActor->ForceToss();  // 走动画路径，会回调 HandleGestureFromDoll(false)
+	}
+	else
+	{
+		HandlePlayerChoice(/*bPlayerChosePass=*/false);
+	}
 }
 
 void UInspectionScreen::AdvanceToNextDoll()
@@ -273,6 +381,7 @@ void UInspectionScreen::AdvanceToNextDoll()
 	SetButtonsEnabled(true);
 	RenderCurrentDoll();
 	RenderProgress();
+	PushCurrentDollToActor();  // 把下一只娃娃 push 给 3D actor，actor 内部 SnapToIdle
 
 	// 启动下一只娃娃的 timeout（若有）
 	if (DollTimeoutSec > 0.0f && GetWorld())
@@ -337,13 +446,28 @@ void UInspectionScreen::RenderCurrentDoll()
 
 void UInspectionScreen::RenderProgress()
 {
-	if (!ProgressText) return;
+	UCh1LocSubsystem* Loc = GetLoc();
+	const int32 Remaining = FMath::Max(0, CorrectGoal - CorrectCount);
 
-	// 进度 = 「正确 / 目标」，强调玩家要凑正确数而非过完池
-	ProgressText->SetText(FText::FromString(
-		FString::Printf(TEXT("正确 %d / %d   （处理 %d 只，丢错 %d）"),
-			CorrectCount, CorrectGoal, CurrentDollIndex, WrongCount)
-	));
+	if (ProgressText && Loc)
+	{
+		ProgressText->SetText(FText::Format(
+			Loc->Get(TEXT("Inspection.Progress")),
+			FText::AsNumber(CorrectCount), FText::AsNumber(CorrectGoal)));
+	}
+	else if (ProgressText)
+	{
+		// fallback：没有 Loc subsystem 也要能跑
+		ProgressText->SetText(FText::FromString(
+			FString::Printf(TEXT("%d / %d"), CorrectCount, CorrectGoal)));
+	}
+
+	if (RemainingText && Loc)
+	{
+		RemainingText->SetText(FText::Format(
+			Loc->Get(TEXT("Inspection.Remaining")),
+			FText::AsNumber(Remaining), FText::AsNumber(CurrentDollIndex), FText::AsNumber(WrongCount)));
+	}
 }
 
 void UInspectionScreen::SetButtonsEnabled(bool bEnabled)
