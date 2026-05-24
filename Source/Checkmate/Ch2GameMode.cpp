@@ -244,6 +244,23 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 		}
 	}
 
+	// Highlight breathing pulse（Timelie 风：valid cell 软呼吸）
+	for (AActor* M : HighlightMarkers)
+	{
+		if (!M) continue;
+		AStaticMeshActor* SMA = Cast<AStaticMeshActor>(M);
+		if (!SMA) continue;
+		UStaticMeshComponent* MC = SMA->GetStaticMeshComponent();
+		if (!MC) continue;
+		const float Pulse = 0.6f + 0.4f * FMath::Sin(WorldElapsed * 3.0f);
+		const FVector C(HighlightColor.R * (1.5f + Pulse), HighlightColor.G * (1.5f + Pulse), HighlightColor.B * (1.5f + Pulse));
+		MC->SetVectorParameterValueOnMaterials(TEXT("Color"), C);
+		MC->SetVectorParameterValueOnMaterials(TEXT("Emissive Color"), C);
+	}
+
+	// 鼠标悬停预览：跟随光标到合法 cell 时显示更亮 marker
+	UpdateHoverMarker();
+
 	// 玩偶 scale pulse：越临近爆炸抖得越快
 	for (FCh2PuppetState& P : Puppets)
 	{
@@ -282,24 +299,29 @@ void ACh2GameMode::RefreshHighlights()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	// 高亮用 cube（有厚度，避免和地板 plane 重叠 z-fight；emissive tint 醒目）
 	UStaticMesh* M = HighlightMesh
-		? HighlightMesh : LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+		? HighlightMesh : LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	const float CS = LevelData->CellSize;
 
 	const TArray<FIntPoint> Valid = ActivePawn->GetValidMoves();
 	for (const FIntPoint& Cell : Valid)
 	{
-		const FVector Loc(Cell.X * CS, Cell.Y * CS, 5.0f);  // 高于地板一点防 z-fighting
+		const FVector Loc(Cell.X * CS, Cell.Y * CS, 15.0f);  // 抬高一些
 		AStaticMeshActor* A = World->SpawnActor<AStaticMeshActor>(Loc, FRotator::ZeroRotator);
 		if (!A) continue;
 		A->SetMobility(EComponentMobility::Movable);
 		if (UStaticMeshComponent* MC = A->GetStaticMeshComponent())
 		{
 			MC->SetStaticMesh(M);
-			MC->SetRelativeScale3D(FVector(CS / 100.0f * 0.85f, CS / 100.0f * 0.85f, 1.0f));
+			// 厚度 0.15 = 15unit，可见的薄板
+			MC->SetRelativeScale3D(FVector(CS / 100.0f * 0.85f, CS / 100.0f * 0.85f, 0.15f));
 			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			MC->SetVectorParameterValueOnMaterials(TEXT("Color"),
-				FVector(HighlightColor.R, HighlightColor.G, HighlightColor.B));
+			// 多个材质参数名（BasicShapeMaterial 用 "Color"；MaterialBaseColor 也试一下）
+			const FVector EmColor(HighlightColor.R * 3.0f, HighlightColor.G * 3.0f, HighlightColor.B * 3.0f);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), EmColor);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Emissive Color"), EmColor);
+			MC->SetVectorParameterValueOnMaterials(TEXT("BaseColor"), FVector(HighlightColor.R, HighlightColor.G, HighlightColor.B));
 		}
 		HighlightMarkers.Add(A);
 	}
@@ -353,6 +375,68 @@ void ACh2GameMode::NotifyPawnMoved(FIntPoint FromCell, FIntPoint ToCell, bool bW
 
 	// 移动后重算合法 cell 高亮
 	RefreshHighlights();
+}
+
+void ACh2GameMode::UpdateHoverMarker()
+{
+	UWorld* World = GetWorld();
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!World || !PC || !LevelData) return;
+
+	FVector WorldOrigin, WorldDir;
+	if (!PC->DeprojectMousePositionToWorld(WorldOrigin, WorldDir)) return;
+	if (FMath::Abs(WorldDir.Z) < KINDA_SMALL_NUMBER) return;
+
+	const float Tval = -WorldOrigin.Z / WorldDir.Z;
+	if (Tval <= 0.0f) return;
+	const FVector HitWorld = WorldOrigin + WorldDir * Tval;
+	const FIntPoint HoverCell(
+		FMath::RoundToInt(HitWorld.X / LevelData->CellSize),
+		FMath::RoundToInt(HitWorld.Y / LevelData->CellSize));
+
+	if (!IsInBounds(HoverCell))
+	{
+		if (HoverMarker) HoverMarker->SetActorHiddenInGame(true);
+		return;
+	}
+
+	// Lazy spawn
+	if (!HoverMarker)
+	{
+		UStaticMesh* M = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+		AStaticMeshActor* A = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator);
+		if (A)
+		{
+			A->SetMobility(EComponentMobility::Movable);
+			if (UStaticMeshComponent* MC = A->GetStaticMeshComponent())
+			{
+				MC->SetStaticMesh(M);
+				MC->SetRelativeScale3D(FVector(LevelData->CellSize / 100.0f * 0.93f,
+					LevelData->CellSize / 100.0f * 0.93f, 0.05f));
+				MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			}
+			HoverMarker = A;
+		}
+	}
+	if (!HoverMarker) return;
+
+	HoverMarker->SetActorHiddenInGame(false);
+	HoverMarker->SetActorLocation(FVector(
+		HoverCell.X * LevelData->CellSize,
+		HoverCell.Y * LevelData->CellSize,
+		8.0f));
+
+	// 区分：合法 → 亮白；非法 → 暗红
+	const bool bValid = ActivePawn ? ActivePawn->GetValidMoves().Contains(HoverCell) : false;
+	if (AStaticMeshActor* SMA = Cast<AStaticMeshActor>(HoverMarker))
+	{
+		if (UStaticMeshComponent* MC = SMA->GetStaticMeshComponent())
+		{
+			const FVector C = bValid ? FVector(1.5f, 1.5f, 1.6f) : FVector(0.4f, 0.1f, 0.12f);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), C);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Emissive Color"), C);
+		}
+	}
 }
 
 void ACh2GameMode::SpawnPuppetAt(FIntPoint Cell)
@@ -463,6 +547,9 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 	// 销毁玩偶 actor + 从列表移除
 	if (P.RuntimeActor) P.RuntimeActor->Destroy();
 	Puppets.RemoveAt(PuppetIdx);
+
+	// bug fix：炸完高亮要重算（破坏的 cell 现在可通行）
+	RefreshHighlights();
 }
 
 void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)

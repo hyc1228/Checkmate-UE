@@ -45,6 +45,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
 	UStaticMeshComponent* BodyMesh = nullptr;
 
+	/** 机械眼 hint：spec 锁定 Ch2 玩家 = 机械眼。Pawn 顶部小球，cyan tint。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components")
+	UStaticMeshComponent* EyeMarker = nullptr;
+
 	/** 单 cell 边长（unit）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Grid", meta=(ClampMin="50"))
 	float CellSize = 200.0f;

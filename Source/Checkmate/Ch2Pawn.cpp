@@ -24,11 +24,17 @@ ACh2Pawn::ACh2Pawn()
 	BodyMesh->SetGenerateOverlapEvents(false);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeAsset(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeAsset.Succeeded())
-	{
-		BodyMesh->SetStaticMesh(CubeAsset.Object);
-	}
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereAsset(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (CubeAsset.Succeeded()) BodyMesh->SetStaticMesh(CubeAsset.Object);
 	BodyMesh->SetRelativeScale3D(FVector(0.6f, 0.6f, 1.0f));
+
+	// 机械眼 hint：pawn 顶部小球（spec：Ch2 玩家 = 机械眼）
+	EyeMarker = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EyeMarker"));
+	EyeMarker->SetupAttachment(BodyMesh);
+	EyeMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (SphereAsset.Succeeded()) EyeMarker->SetStaticMesh(SphereAsset.Object);
+	EyeMarker->SetRelativeLocation(FVector(60.0f, 0.0f, 50.0f));  // 向 +X 突出一点像"看的方向"
+	EyeMarker->SetRelativeScale3D(FVector(0.25f));
 }
 
 void ACh2Pawn::BeginPlay()
@@ -46,6 +52,11 @@ void ACh2Pawn::SetMode(ECh2Mode NewMode)
 			? FVector(0.95f, 0.75f, 0.2f)
 			: FVector(0.92f, 0.92f, 0.98f);
 		BodyMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), Tint);
+	}
+	if (EyeMarker)
+	{
+		// 机械眼 cyan—两种模式都是 Ch2 玩家，眼睛都是机械眼
+		EyeMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(0.2f, 0.95f, 1.4f));
 	}
 
 	if (ACh2GameMode* GM = GetGM())
@@ -219,7 +230,20 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 		return;  // lerp 期间不接受新输入
 	}
 
-	// 2) R 键 重启关卡
+	// 2) Idle bob：站着时身体微微浮动呼吸（机械眼隐喻：未睡死的人偶）
+	{
+		static float IdleElapsed = 0.0f;
+		IdleElapsed += DeltaSeconds;
+		const float Bob = FMath::Sin(IdleElapsed * 2.5f) * 4.0f;
+		if (BodyMesh)
+		{
+			FVector RelLoc = BodyMesh->GetRelativeLocation();
+			RelLoc.Z = Bob;
+			BodyMesh->SetRelativeLocation(RelLoc);
+		}
+	}
+
+	// 3) R 键 重启关卡
 	if (PC->WasInputKeyJustPressed(EKeys::R))
 	{
 		UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this, /*bRemovePrefixString=*/true)));

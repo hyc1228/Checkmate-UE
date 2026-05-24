@@ -1,4 +1,17 @@
-# Ch2 棋盘逃脱 — 代码使用 / 调参文档（v0.2）
+# Ch2 棋盘逃脱 — 代码使用 / 调参文档（v0.3 demo-ready）
+
+> v0.3 增量（在 v0.2 基础上）：
+> - 高亮 cube（emissive + breathing pulse，Timelie 风）
+> - 鼠标悬停预览 marker（合法/非法颜色区分）
+> - Pawn idle bob（站立呼吸 sin Z 浮动）
+> - Pawn 顶部机械眼 marker（cyan）—— spec eye motif
+> - PP_BlackWhite：vignette 0.55 + 色散 1.2 + film grain 0.4 + 对比度 1.15
+> - HUD ModeText/HintText/Victory/Ritual 颜色显式（白 / 浅紫 / 绿 / 白）
+> - 爆炸后自动 RefreshHighlights（之前破坏的 cell 不会更新可达性 — 修）
+> - HintText 加 "R 重启关卡" 提示
+>
+> **明天打开就玩：** 直接打开 `Ch2Test.umap` 按 Play。Ch1 同理 `Ch1Test.umap`。
+> 替美术工作流见后面 §「Asset 路径」+ §B/C/D。
 
 > v0.2 增量（在 v0.1 数据驱动 + EUW 基础上）：
 > - HUD：当前模式 + 提示 + 拾取 ritual fade + 胜利屏（R 重启）

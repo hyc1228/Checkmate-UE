@@ -161,14 +161,20 @@ protected:
 	UPROPERTY()
 	AActor* ExitActor = nullptr;
 
+	/** 鼠标悬停预览 marker（单 actor，跟鼠标移动）。 */
+	UPROPERTY()
+	AActor* HoverMarker = nullptr;
+
 	float WorldElapsed = 0.0f;
+	FIntPoint LastHoverCell = FIntPoint(-1, -1);
 
 	/** 当前活跃的爆炸玩偶。 */
 	UPROPERTY()
 	TArray<FCh2PuppetState> Puppets;
 
 	void SpawnPuppetAt(FIntPoint Cell);
-	void TickPuppets();      // 每次玩家移动后调，倒计时 -1
-	void ExplodePuppet(int32 PuppetIdx);  // 爆炸：清掉相邻 Destructible
+	void TickPuppets();
+	void ExplodePuppet(int32 PuppetIdx);
 	void RefreshPuppetVisual(FCh2PuppetState& P);
+	void UpdateHoverMarker();
 };
