@@ -2,8 +2,10 @@
 
 #include "Ch2GameMode.h"
 
+#include "Ch2HUDWidget.h"
 #include "Ch2Pawn.h"
 
+#include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -15,8 +17,8 @@
 
 ACh2GameMode::ACh2GameMode()
 {
-	PrimaryActorTick.bCanEverTick = false;
-	// Ch2 不要 mouse-look pawn；玩家 pawn 由 BuildLevel 手动 spawn 到 start cell
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.05f;  // 20Hz 够用，节省 cpu
 	DefaultPawnClass = APawn::StaticClass();
 }
 
@@ -91,12 +93,12 @@ void ACh2GameMode::BuildLevel()
 		if (UStaticMeshComponent* MC = Floor->GetStaticMeshComponent())
 		{
 			MC->SetStaticMesh(FloorM);
-			MC->SetRelativeScale3D(FVector(CS / 100.0f, CS / 100.0f, 1.0f));  // plane 100x100 → CS
-			// 黑白棋盘 tint
+			MC->SetRelativeScale3D(FVector(CS / 100.0f, CS / 100.0f, 1.0f));
 			const bool bWhite = ((X + Y) % 2) == 0;
 			MC->SetVectorParameterValueOnMaterials(TEXT("Color"),
 				bWhite ? FVector(0.85f, 0.85f, 0.85f) : FVector(0.15f, 0.15f, 0.15f));
 		}
+		FloorActors.Add(FIntPoint(X, Y), Floor);
 	}
 
 	// 2) 特殊 cell 上的 decoration actors
@@ -137,8 +139,17 @@ void ACh2GameMode::BuildLevel()
 		case ECh2CellType::Exit:
 			DecoMesh = ExitM;
 			DecoScale = FVector(CS / 100.0f, CS / 100.0f, 1.0f);
-			TintColor = FVector(0.2f, 0.9f, 0.5f);  // 出口绿
+			TintColor = FVector(0.2f, 0.9f, 0.5f);
 			DecoActor->SetActorLocation(FVector(C.X * CS, C.Y * CS, 5.0f));
+			ExitActor = DecoActor;
+			break;
+		case ECh2CellType::WeddingWreckage:
+			DecoMesh = WallM;
+			DecoScale = FVector(CS / 100.0f * 0.45f, CS / 100.0f * 0.45f, CS / 100.0f * 0.25f);
+			TintColor = FVector(0.85f, 0.85f, 0.9f);  // 偏白
+			// 倒地姿态：rotation pitch -65 + 随机 yaw
+			DecoActor->SetActorLocation(FVector(C.X * CS, C.Y * CS, CS * 0.12f));
+			DecoActor->SetActorRotation(FRotator(-65.0f, FMath::FRandRange(-30.0f, 30.0f), 0.0f));
 			break;
 		default: break;
 		}
@@ -166,6 +177,131 @@ void ACh2GameMode::BuildLevel()
 		{
 			PC->Possess(ActivePawn);
 		}
+	}
+
+	// HUD
+	if (Ch2HUDClass)
+	{
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+		{
+			HUDWidget = CreateWidget<UCh2HUDWidget>(PC, Ch2HUDClass);
+			if (HUDWidget)
+			{
+				HUDWidget->AddToViewport(/*ZOrder=*/10);
+				if (ActivePawn) HUDWidget->SetMode(ActivePawn->CurrentMode);
+			}
+		}
+	}
+
+	RefreshHighlights();
+}
+
+void ACh2GameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	WorldElapsed += DeltaSeconds;
+
+	// sensorium 扩张：出口附近地板渐变成彩色（曼哈顿距离 ≤ ColorRadius）
+	const FIntPoint ExitCell = LevelData ? LevelData->FindCellOfType(ECh2CellType::Exit) : FIntPoint(-1, -1);
+	if (ExitCell.X >= 0)
+	{
+		const int32 ColorRadius = 3;
+		const float ExitPulse = 0.5f + 0.5f * FMath::Sin(WorldElapsed * 2.0f);
+		for (const TPair<FIntPoint, AActor*>& P : FloorActors)
+		{
+			if (!P.Value) continue;
+			const int32 Dist = FMath::Abs(P.Key.X - ExitCell.X) + FMath::Abs(P.Key.Y - ExitCell.Y);
+			if (Dist > ColorRadius) continue;
+			AStaticMeshActor* SMA = Cast<AStaticMeshActor>(P.Value);
+			if (!SMA) continue;
+			UStaticMeshComponent* MC = SMA->GetStaticMeshComponent();
+			if (!MC) continue;
+
+			const float Strength = (1.0f - static_cast<float>(Dist) / ColorRadius) * 0.7f * ExitPulse;
+			const bool bWhite = ((P.Key.X + P.Key.Y) % 2) == 0;
+			const FVector Base = bWhite ? FVector(0.85f) : FVector(0.15f);
+			const FVector Colored = FMath::Lerp(Base,
+				FVector(0.4f + ExitPulse * 0.3f, 0.85f, 0.55f + ExitPulse * 0.2f),
+				Strength);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), Colored);
+		}
+	}
+
+	// 出口 pulse：基色 + sin 节拍亮起（spec「一抹彩色」）
+	if (ExitActor)
+	{
+		if (AStaticMeshActor* SMA = Cast<AStaticMeshActor>(ExitActor))
+		{
+			if (UStaticMeshComponent* MC = SMA->GetStaticMeshComponent())
+			{
+				const float Pulse = 0.5f + 0.5f * FMath::Sin(WorldElapsed * 2.0f);
+				const FVector C = FMath::Lerp(
+					FVector(0.2f, 0.9f, 0.5f),
+					FVector(0.7f, 1.0f, 0.85f),
+					Pulse);
+				MC->SetVectorParameterValueOnMaterials(TEXT("Color"), C);
+			}
+		}
+	}
+
+	// 玩偶 scale pulse：越临近爆炸抖得越快
+	for (FCh2PuppetState& P : Puppets)
+	{
+		if (!P.RuntimeActor) continue;
+		AStaticMeshActor* SMA = Cast<AStaticMeshActor>(P.RuntimeActor);
+		if (!SMA) continue;
+		UStaticMeshComponent* MC = SMA->GetStaticMeshComponent();
+		if (!MC) continue;
+
+		const float Urgency = 1.0f - (static_cast<float>(P.TurnsRemaining) / FMath::Max(1, PuppetExplodeAfterTurns));
+		const float Freq = 3.0f + Urgency * 12.0f;
+		const float ScaleBase = 0.6f + 0.15f * FMath::Sin(WorldElapsed * Freq);
+		MC->SetRelativeScale3D(FVector(ScaleBase, ScaleBase, ScaleBase));
+	}
+}
+
+void ACh2GameMode::NotifyModeChanged()
+{
+	if (HUDWidget && ActivePawn)
+	{
+		HUDWidget->SetMode(ActivePawn->CurrentMode);
+	}
+	RefreshHighlights();
+}
+
+void ACh2GameMode::RefreshHighlights()
+{
+	// 清旧 markers
+	for (AActor* M : HighlightMarkers)
+	{
+		if (M) M->Destroy();
+	}
+	HighlightMarkers.Reset();
+
+	if (!ActivePawn || !LevelData) return;
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UStaticMesh* M = HighlightMesh
+		? HighlightMesh : LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	const float CS = LevelData->CellSize;
+
+	const TArray<FIntPoint> Valid = ActivePawn->GetValidMoves();
+	for (const FIntPoint& Cell : Valid)
+	{
+		const FVector Loc(Cell.X * CS, Cell.Y * CS, 5.0f);  // 高于地板一点防 z-fighting
+		AStaticMeshActor* A = World->SpawnActor<AStaticMeshActor>(Loc, FRotator::ZeroRotator);
+		if (!A) continue;
+		A->SetMobility(EComponentMobility::Movable);
+		if (UStaticMeshComponent* MC = A->GetStaticMeshComponent())
+		{
+			MC->SetStaticMesh(M);
+			MC->SetRelativeScale3D(FVector(CS / 100.0f * 0.85f, CS / 100.0f * 0.85f, 1.0f));
+			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Color"),
+				FVector(HighlightColor.R, HighlightColor.G, HighlightColor.B));
+		}
+		HighlightMarkers.Add(A);
 	}
 }
 
@@ -214,6 +350,9 @@ void ACh2GameMode::NotifyPawnMoved(FIntPoint FromCell, FIntPoint ToCell, bool bW
 	}
 	// 任何一步都推进所有玩偶倒计时
 	TickPuppets();
+
+	// 移动后重算合法 cell 高亮
+	RefreshHighlights();
 }
 
 void ACh2GameMode::SpawnPuppetAt(FIntPoint Cell)
@@ -283,6 +422,26 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 
 	UE_LOG(LogTemp, Display, TEXT("Ch2: 爆炸玩偶 BOOM @ (%d,%d)"), P.Cell.X, P.Cell.Y);
 
+	// Flash 占位：在爆炸位 spawn 一颗亮黄白球，0.3s 后自销毁
+	if (UWorld* W = GetWorld())
+	{
+		UStaticMesh* SphereM = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+		const FVector FlashLoc(P.Cell.X * LevelData->CellSize, P.Cell.Y * LevelData->CellSize, LevelData->CellSize * 0.5f);
+		AStaticMeshActor* Flash = W->SpawnActor<AStaticMeshActor>(FlashLoc, FRotator::ZeroRotator);
+		if (Flash)
+		{
+			Flash->SetMobility(EComponentMobility::Movable);
+			if (UStaticMeshComponent* MC = Flash->GetStaticMeshComponent())
+			{
+				MC->SetStaticMesh(SphereM);
+				MC->SetRelativeScale3D(FVector(1.8f));
+				MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(2.0f, 1.6f, 0.6f));
+			}
+			Flash->SetLifeSpan(0.35f);
+		}
+	}
+
 	// 邻 4 方向：清掉 Destructible
 	const FIntPoint Dirs[4] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
 	for (const FIntPoint& D : Dirs)
@@ -314,23 +473,22 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 
 	if (Type == ECh2CellType::ClownPickup)
 	{
+		if (HUDWidget) HUDWidget->PlayPickupRitual();
 		if (ActivePawn)
 		{
 			ActivePawn->SetMode(ECh2Mode::Clown);
 		}
-		// 移除拾取 actor
 		if (AActor** Found = CellActors.Find(Cell))
 		{
 			if (*Found) (*Found)->Destroy();
 			CellActors.Remove(Cell);
 		}
-		// 把 cell 类型清掉，避免重复触发
 		LevelData->Cells.Remove(Cell);
 		UE_LOG(LogTemp, Display, TEXT("Ch2: 拾取小丑残骸 → 切换 Mode::Clown"));
 	}
 	else if (Type == ECh2CellType::Exit)
 	{
 		UE_LOG(LogTemp, Display, TEXT("Ch2: 抵达出口 — Ch2 Complete"));
-		// TODO Tier C：触发胜利演出
+		if (HUDWidget) HUDWidget->ShowVictory();
 	}
 }

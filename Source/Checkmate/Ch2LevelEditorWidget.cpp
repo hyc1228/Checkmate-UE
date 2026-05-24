@@ -195,12 +195,13 @@ FLinearColor UCh2LevelEditorWidget::ColorForType(ECh2CellType Type)
 {
 	switch (Type)
 	{
-	case ECh2CellType::Empty:        return FLinearColor(0.20f, 0.20f, 0.20f);
-	case ECh2CellType::Wall:         return FLinearColor(0.40f, 0.40f, 0.45f);
-	case ECh2CellType::Destructible: return FLinearColor(0.70f, 0.50f, 0.30f);
-	case ECh2CellType::ClownPickup:  return FLinearColor(0.95f, 0.75f, 0.20f);
-	case ECh2CellType::Exit:         return FLinearColor(0.20f, 0.90f, 0.50f);
-	case ECh2CellType::Start:        return FLinearColor(0.50f, 0.85f, 0.95f);
+	case ECh2CellType::Empty:           return FLinearColor(0.20f, 0.20f, 0.20f);
+	case ECh2CellType::Wall:            return FLinearColor(0.40f, 0.40f, 0.45f);
+	case ECh2CellType::Destructible:    return FLinearColor(0.70f, 0.50f, 0.30f);
+	case ECh2CellType::ClownPickup:     return FLinearColor(0.95f, 0.75f, 0.20f);
+	case ECh2CellType::Exit:            return FLinearColor(0.20f, 0.90f, 0.50f);
+	case ECh2CellType::Start:           return FLinearColor(0.50f, 0.85f, 0.95f);
+	case ECh2CellType::WeddingWreckage: return FLinearColor(0.85f, 0.85f, 0.90f);
 	}
 	return FLinearColor::Black;
 }
@@ -209,12 +210,13 @@ FString UCh2LevelEditorWidget::LabelForType(ECh2CellType Type)
 {
 	switch (Type)
 	{
-	case ECh2CellType::Empty:        return TEXT("·");
-	case ECh2CellType::Wall:         return TEXT("█");
-	case ECh2CellType::Destructible: return TEXT("▓");
-	case ECh2CellType::ClownPickup:  return TEXT("◆");
-	case ECh2CellType::Exit:         return TEXT("→");
-	case ECh2CellType::Start:        return TEXT("✦");
+	case ECh2CellType::Empty:           return TEXT("·");
+	case ECh2CellType::Wall:            return TEXT("█");
+	case ECh2CellType::Destructible:    return TEXT("▓");
+	case ECh2CellType::ClownPickup:     return TEXT("◆");
+	case ECh2CellType::Exit:            return TEXT("→");
+	case ECh2CellType::Start:           return TEXT("✦");
+	case ECh2CellType::WeddingWreckage: return TEXT("♥");
 	}
 	return TEXT("?");
 }

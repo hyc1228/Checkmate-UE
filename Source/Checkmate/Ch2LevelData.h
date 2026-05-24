@@ -15,6 +15,7 @@ enum class ECh2CellType : uint8
 	ClownPickup UMETA(DisplayName="小丑残骸（拾取）"),
 	Exit        UMETA(DisplayName="出口"),
 	Start       UMETA(DisplayName="起点"),
+	WeddingWreckage UMETA(DisplayName="婚纱残骸（装饰）"),
 };
 
 /**

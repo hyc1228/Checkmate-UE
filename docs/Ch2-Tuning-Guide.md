@@ -1,3 +1,15 @@
+# Ch2 棋盘逃脱 — 代码使用 / 调参文档（v0.2）
+
+> v0.2 增量（在 v0.1 数据驱动 + EUW 基础上）：
+> - HUD：当前模式 + 提示 + 拾取 ritual fade + 胜利屏（R 重启）
+> - 合法 cell 高亮 markers（青色 plane）
+> - 移动 lerp（0.22s ease + hop 弧）
+> - 出口色彩 pulse + 邻近地板 sensorium 渐变
+> - 爆炸玩偶 scale pulse + 爆炸 flash 球
+> - 婚纱残骸装饰（ECh2CellType::WeddingWreckage，非互动）
+> - DA_Ch2Level_02（6×6 演示多关卡）
+> - bug fix：芭蕾滑动现在会停在 Pickup / Exit cell（之前会跳过）
+
 # Ch2 棋盘逃脱 — 代码使用 / 调参文档（v0.1 原型）
 
 > 范围：第二章 vertical slice — 俯视棋盘 + 两种走法 + 切换 ritual + 爆炸玩偶 + 出口。

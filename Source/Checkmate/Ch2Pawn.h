@@ -82,6 +82,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ch2")
 	FText GetModeDisplayName() const;
 
+	/** 一次移动的 lerp 时长（秒）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0.05"))
+	float MoveDuration = 0.22f;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -92,4 +96,13 @@ protected:
 
 	void ComputeBalletMoves(TArray<FIntPoint>& OutMoves) const;
 	void ComputeClownMoves(TArray<FIntPoint>& OutMoves) const;
+
+	// 移动 lerp 状态
+	bool bMoving = false;
+	FVector MoveStartLoc = FVector::ZeroVector;
+	FVector MoveEndLoc = FVector::ZeroVector;
+	float MoveElapsed = 0.0f;
+	FIntPoint PendingTargetCell = FIntPoint::ZeroValue;
+	bool bPendingClownMove = false;
+	FIntPoint PendingFromCell = FIntPoint::ZeroValue;
 };

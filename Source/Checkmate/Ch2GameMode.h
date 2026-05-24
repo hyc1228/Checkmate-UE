@@ -10,6 +10,7 @@
 class ACh2Pawn;
 class UStaticMesh;
 class UMaterialInterface;
+class UCh2HUDWidget;
 
 /** 一个爆炸玩偶的运行时状态（小丑日字跳后留在前一 cell 上）。 */
 USTRUCT(BlueprintType)
@@ -115,8 +116,26 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch2|Visual")
 	UStaticMesh* PuppetMesh = nullptr;
 
+	/** 合法目标 cell 上的高亮 marker mesh。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch2|Visual")
+	UStaticMesh* HighlightMesh = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch2|Visual")
+	FLinearColor HighlightColor = FLinearColor(0.2f, 0.95f, 1.0f, 1.0f);
+
+	/** HUD widget class（继承 UCh2HUDWidget）。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch2|Classes")
+	TSubclassOf<UCh2HUDWidget> Ch2HUDClass;
+
+	UFUNCTION(BlueprintCallable, Category="Ch2")
+	void RefreshHighlights();
+
+	UFUNCTION(BlueprintCallable, Category="Ch2")
+	void NotifyModeChanged();
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	void BuildLevel();
 	void SetUpTopDownCamera();
@@ -127,6 +146,22 @@ protected:
 	/** runtime 实例化的 cell-decoration actors（按 cell 索引）。 */
 	UPROPERTY()
 	TMap<FIntPoint, AActor*> CellActors;
+
+	/** 地板 actors（按 cell 索引），用于改色 / 高亮。 */
+	UPROPERTY()
+	TMap<FIntPoint, AActor*> FloorActors;
+
+	/** 合法目标 cell 上的高亮 marker（每次 RefreshHighlights 重 spawn）。 */
+	UPROPERTY()
+	TArray<AActor*> HighlightMarkers;
+
+	UPROPERTY()
+	UCh2HUDWidget* HUDWidget = nullptr;
+
+	UPROPERTY()
+	AActor* ExitActor = nullptr;
+
+	float WorldElapsed = 0.0f;
 
 	/** 当前活跃的爆炸玩偶。 */
 	UPROPERTY()

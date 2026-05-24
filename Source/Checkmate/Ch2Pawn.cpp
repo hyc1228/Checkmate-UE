@@ -40,12 +40,18 @@ void ACh2Pawn::BeginPlay()
 void ACh2Pawn::SetMode(ECh2Mode NewMode)
 {
 	CurrentMode = NewMode;
-	if (!BodyMesh) return;
+	if (BodyMesh)
+	{
+		const FVector Tint = (NewMode == ECh2Mode::Clown)
+			? FVector(0.95f, 0.75f, 0.2f)
+			: FVector(0.92f, 0.92f, 0.98f);
+		BodyMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), Tint);
+	}
 
-	const FVector Tint = (NewMode == ECh2Mode::Clown)
-		? FVector(0.95f, 0.75f, 0.2f)   // 小丑金
-		: FVector(0.92f, 0.92f, 0.98f); // 芭蕾白
-	BodyMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), Tint);
+	if (ACh2GameMode* GM = GetGM())
+	{
+		GM->NotifyModeChanged();
+	}
 }
 
 ACh2GameMode* ACh2Pawn::GetGM() const
@@ -90,6 +96,7 @@ bool ACh2Pawn::IsWall(FIntPoint Cell) const
 
 void ACh2Pawn::ComputeBalletMoves(TArray<FIntPoint>& OutMoves) const
 {
+	ACh2GameMode* GM = GetGM();
 	const FIntPoint Cur = GetCurrentCell();
 	const FIntPoint Dirs[4] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
 
@@ -102,8 +109,16 @@ void ACh2Pawn::ComputeBalletMoves(TArray<FIntPoint>& OutMoves) const
 			Probe.X += D.X;
 			Probe.Y += D.Y;
 			if (!IsInBounds(Probe)) break;
-			if (IsWall(Probe)) break;
+
+			const ECh2CellType T = GM ? GM->GetCellType(Probe) : ECh2CellType::Empty;
+			// Wall / Destructible：不可进入，滑停在前一格
+			if (T == ECh2CellType::Wall || T == ECh2CellType::Destructible) break;
+
+			// 可进入：成为新候选 landing
 			LastValid = Probe;
+
+			// Pickup / Exit：滑停 AT 此格（landed 并触发）
+			if (T == ECh2CellType::ClownPickup || T == ECh2CellType::Exit) break;
 		}
 		if (LastValid != Cur)
 		{
@@ -137,19 +152,18 @@ TArray<FIntPoint> ACh2Pawn::GetValidMoves() const
 
 bool ACh2Pawn::TryMoveTo(FIntPoint TargetCell)
 {
+	if (bMoving) return false;  // 当前正在 lerp 中，吃掉新点击
+
 	const TArray<FIntPoint> Valid = GetValidMoves();
 	if (!Valid.Contains(TargetCell)) return false;
 
-	const FIntPoint FromCell = GetCurrentCell();
-	const bool bClownMove = (CurrentMode == ECh2Mode::Clown);
-
-	SetActorLocation(CellToWorld(TargetCell));
-
-	if (ACh2GameMode* GM = GetGM())
-	{
-		GM->NotifyPawnMoved(FromCell, TargetCell, bClownMove);
-		GM->NotifyPawnEnteredCell(TargetCell);  // 拾取 / 胜利检查
-	}
+	PendingFromCell = GetCurrentCell();
+	PendingTargetCell = TargetCell;
+	bPendingClownMove = (CurrentMode == ECh2Mode::Clown);
+	MoveStartLoc = GetActorLocation();
+	MoveEndLoc = CellToWorld(TargetCell);
+	MoveElapsed = 0.0f;
+	bMoving = true;
 	return true;
 }
 
@@ -160,12 +174,43 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PC) return;
 
+	// 1) Lerp 中：推进动画，结束时触发 Notify
+	if (bMoving)
+	{
+		MoveElapsed += DeltaSeconds;
+		const float T = FMath::Clamp(MoveElapsed / MoveDuration, 0.0f, 1.0f);
+		const float Eased = FMath::InterpEaseOut(0.0f, 1.0f, T, 2.0f);
+		// 加一点 hop 弧线（中间略抬起）
+		FVector L = FMath::Lerp(MoveStartLoc, MoveEndLoc, Eased);
+		L.Z += FMath::Sin(T * PI) * 30.0f;
+		SetActorLocation(L);
+
+		if (T >= 1.0f)
+		{
+			bMoving = false;
+			SetActorLocation(MoveEndLoc);
+			if (ACh2GameMode* GM = GetGM())
+			{
+				GM->NotifyPawnMoved(PendingFromCell, PendingTargetCell, bPendingClownMove);
+				GM->NotifyPawnEnteredCell(PendingTargetCell);
+			}
+		}
+		return;  // lerp 期间不接受新输入
+	}
+
+	// 2) R 键 重启关卡
+	if (PC->WasInputKeyJustPressed(EKeys::R))
+	{
+		UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this, /*bRemovePrefixString=*/true)));
+		return;
+	}
+
+	// 3) LMB → 鼠标 deproject → cell → 尝试移动
 	if (PC->WasInputKeyJustPressed(EKeys::LeftMouseButton))
 	{
 		FVector WorldOrigin, WorldDir;
 		if (PC->DeprojectMousePositionToWorld(WorldOrigin, WorldDir))
 		{
-			// 与 Z=0 平面相交（地板高度）
 			if (FMath::Abs(WorldDir.Z) > KINDA_SMALL_NUMBER)
 			{
 				const float T = -WorldOrigin.Z / WorldDir.Z;
