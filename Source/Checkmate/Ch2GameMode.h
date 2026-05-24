@@ -158,6 +158,11 @@ protected:
 	UPROPERTY()
 	UCh2HUDWidget* HUDWidget = nullptr;
 
+	/** Runtime cell 副本——BuildLevel 时从 LevelData.Cells 拷贝，
+	 *  之后所有 mutate（拾取、爆炸炸开）只动它，不污染源 DataAsset。 */
+	UPROPERTY()
+	TMap<FIntPoint, ECh2CellType> RuntimeCells;
+
 	UPROPERTY()
 	AActor* ExitActor = nullptr;
 

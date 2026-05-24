@@ -43,6 +43,8 @@ void ACh2GameMode::BeginPlay()
 
 ECh2CellType ACh2GameMode::GetCellType(FIntPoint Cell) const
 {
+	// 优先读 RuntimeCells（运行时副本）；fallback 到 LevelData
+	if (const ECh2CellType* T = RuntimeCells.Find(Cell)) return *T;
 	return LevelData ? LevelData->GetCellType(Cell) : ECh2CellType::Empty;
 }
 
@@ -81,6 +83,9 @@ void ACh2GameMode::BuildLevel()
 	const float CS = LevelData->CellSize;
 	const int32 W = LevelData->GridWidth;
 	const int32 H = LevelData->GridHeight;
+
+	// 拷贝 cells 到 runtime 副本（重要：gameplay mutate 不污染源 asset）
+	RuntimeCells = LevelData->Cells;
 
 	// 1) 全格地板（黑白交替）
 	for (int32 X = 0; X < W; ++X)
@@ -549,7 +554,7 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 		if (!IsInBounds(N)) continue;
 		if (GetCellType(N) == ECh2CellType::Destructible)
 		{
-			LevelData->Cells.Remove(N);
+			RuntimeCells.Remove(N);
 			if (AActor** Found = CellActors.Find(N))
 			{
 				if (*Found) (*Found)->Destroy();
@@ -585,7 +590,7 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 			if (*Found) (*Found)->Destroy();
 			CellActors.Remove(Cell);
 		}
-		LevelData->Cells.Remove(Cell);
+		RuntimeCells.Remove(Cell);
 		UE_LOG(LogTemp, Display, TEXT("Ch2: 拾取小丑残骸 → 切换 Mode::Clown"));
 	}
 	else if (Type == ECh2CellType::Exit)
