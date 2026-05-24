@@ -11,6 +11,8 @@ class ACh2Pawn;
 class UStaticMesh;
 class UMaterialInterface;
 class UCh2HUDWidget;
+class ULevelSequence;
+class UCameraShakeBase;
 
 /** 一个爆炸玩偶的运行时状态（小丑日字跳后留在前一 cell 上）。 */
 USTRUCT(BlueprintType)
@@ -120,6 +122,30 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch2|Visual")
 	UStaticMesh* HighlightMesh = nullptr;
 
+	// ── Cinematic Sequence 接口 ────────────────────────────────────────
+	// 设计师把 LevelSequence asset 拖到这里的 map 槽里。code 在关键时刻调
+	// TryPlaySequence(Key) — 有 asset 就播 cinematic，无就 fallback 到 UMG/log。
+	//
+	// 当前接入的关键 key（spec 内的过场点）：
+	//   Ch2.Intro       — 进入 Ch2 醒来（slice 暂未触发，留 hook）
+	//   Ch2.Pickup      — 拾取小丑残骸切换（spec：取扣/缝扣）
+	//   Ch2.Explosion   — 爆炸玩偶 BOOM
+	//   Ch2.Victory     — 抵达出口
+	//   Ch2.ShiftIn     — 玩家滑入起点（slice 暂未触发，留 hook）
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ch2|Sequences", meta=(ForceInlineRow))
+	TMap<FName, TSoftObjectPtr<ULevelSequence>> NamedSequences;
+
+	/** 触发命名 sequence。返回是否真的播了 sequence；返回 false 时调用方 fallback。 */
+	UFUNCTION(BlueprintCallable, Category="Ch2|Sequences")
+	bool TryPlaySequence(FName Key);
+
+	/** 爆炸 camera shake 振幅（unit）+ 时长（秒）。直接由 Tick 实现。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0"))
+	float ExplosionShakeMagnitude = 12.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0.05"))
+	float ExplosionShakeDuration = 0.4f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Ch2|Visual")
 	FLinearColor HighlightColor = FLinearColor(0.2f, 0.95f, 1.0f, 1.0f);
 
@@ -172,6 +198,14 @@ protected:
 
 	float WorldElapsed = 0.0f;
 	FIntPoint LastHoverCell = FIntPoint(-1, -1);
+
+	// Camera shake Tick state
+	float ShakeElapsed = 0.0f;
+	float ShakeTotal = 0.0f;
+	FVector CamBaseLoc = FVector::ZeroVector;
+
+	UPROPERTY()
+	AActor* CameraActorRef = nullptr;
 
 	/** 当前活跃的爆炸玩偶。 */
 	UPROPERTY()

@@ -8,18 +8,42 @@
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/CameraShakeBase.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "LevelSequence.h"
+#include "LevelSequenceActor.h"
+#include "LevelSequencePlayer.h"
+#include "MovieSceneSequencePlaybackSettings.h"
 
 ACh2GameMode::ACh2GameMode()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.TickInterval = 0.05f;  // 20Hz 够用，节省 cpu
+	PrimaryActorTick.TickInterval = 0.05f;
 	DefaultPawnClass = APawn::StaticClass();
+}
+
+bool ACh2GameMode::TryPlaySequence(FName Key)
+{
+	TSoftObjectPtr<ULevelSequence>* SoftPtr = NamedSequences.Find(Key);
+	if (!SoftPtr) return false;
+	ULevelSequence* Seq = SoftPtr->LoadSynchronous();
+	if (!Seq) return false;
+
+	FMovieSceneSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	ALevelSequenceActor* SeqActor = nullptr;
+	ULevelSequencePlayer* Player = ULevelSequencePlayer::CreateLevelSequencePlayer(
+		GetWorld(), Seq, Settings, SeqActor);
+	if (!Player) return false;
+
+	Player->Play();
+	UE_LOG(LogTemp, Display, TEXT("Ch2 Sequence: 播放 %s"), *Key.ToString());
+	return true;
 }
 
 void ACh2GameMode::BeginPlay()
@@ -206,6 +230,24 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	WorldElapsed += DeltaSeconds;
 
+	// Camera shake：sin 振幅衰减
+	if (CameraActorRef && ShakeTotal > 0.0f)
+	{
+		ShakeElapsed += DeltaSeconds;
+		if (ShakeElapsed >= ShakeTotal)
+		{
+			ShakeTotal = 0.0f;
+			CameraActorRef->SetActorLocation(CamBaseLoc);
+		}
+		else
+		{
+			const float Decay = 1.0f - (ShakeElapsed / ShakeTotal);
+			const float OffsetZ = FMath::Sin(ShakeElapsed * 80.0f) * ExplosionShakeMagnitude * Decay;
+			const float OffsetX = FMath::Cos(ShakeElapsed * 65.0f) * ExplosionShakeMagnitude * 0.6f * Decay;
+			CameraActorRef->SetActorLocation(CamBaseLoc + FVector(OffsetX, 0, OffsetZ));
+		}
+	}
+
 	// sensorium 扩张：出口附近地板渐变成彩色（曼哈顿距离 ≤ ColorRadius）
 	const FIntPoint ExitCell = LevelData ? LevelData->FindCellOfType(ECh2CellType::Exit) : FIntPoint(-1, -1);
 	if (ExitCell.X >= 0)
@@ -354,6 +396,8 @@ void ACh2GameMode::SetUpTopDownCamera()
 	if (Cam)
 	{
 		Cam->Tags.Add(TEXT("Ch2_TopDownCam"));
+		CameraActorRef = Cam;
+		CamBaseLoc = CamLoc;
 		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
 		{
 			PC->SetViewTargetWithBlend(Cam, 0.0f);
@@ -526,6 +570,11 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 
 	UE_LOG(LogTemp, Display, TEXT("Ch2: 爆炸玩偶 BOOM @ (%d,%d)"), P.Cell.X, P.Cell.Y);
 
+	// 优先播 Ch2.Explosion sequence；总是叠加 camera shake + flash 球（即时反馈）
+	TryPlaySequence(TEXT("Ch2.Explosion"));
+	ShakeElapsed = 0.0f;
+	ShakeTotal = ExplosionShakeDuration;
+
 	// Flash 占位：在爆炸位 spawn 一颗亮黄白球，0.3s 后自销毁
 	if (UWorld* W = GetWorld())
 	{
@@ -580,7 +629,11 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 
 	if (Type == ECh2CellType::ClownPickup)
 	{
-		if (HUDWidget) HUDWidget->PlayPickupRitual();
+		// 优先播 Ch2.Pickup sequence；fallback UMG fade
+		if (!TryPlaySequence(TEXT("Ch2.Pickup")) && HUDWidget)
+		{
+			HUDWidget->PlayPickupRitual();
+		}
 		if (ActivePawn)
 		{
 			ActivePawn->SetMode(ECh2Mode::Clown);
@@ -596,6 +649,10 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 	else if (Type == ECh2CellType::Exit)
 	{
 		UE_LOG(LogTemp, Display, TEXT("Ch2: 抵达出口 — Ch2 Complete"));
-		if (HUDWidget) HUDWidget->ShowVictory();
+		// 优先播 Ch2.Victory sequence；fallback UMG victory screen
+		if (!TryPlaySequence(TEXT("Ch2.Victory")) && HUDWidget)
+		{
+			HUDWidget->ShowVictory();
+		}
 	}
 }

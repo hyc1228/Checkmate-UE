@@ -14,7 +14,8 @@ public class Checkmate : ModuleRules
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
-			"Slate", "SlateCore"  // For FWidgetTransform / advanced UMG features
+			"Slate", "SlateCore",  // For FWidgetTransform / advanced UMG features
+			"LevelSequence", "MovieScene", "MovieSceneTracks"  // Cinematic sequence integration
 		});
 
 		// Editor-only：关卡编辑器 EUW 需要 Blutility（UEditorUtilityWidget）+
