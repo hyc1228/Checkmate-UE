@@ -84,7 +84,8 @@ for d in NEW_DOLLS:
     asset.set_editor_property("expression_traits", to_name_set(d["expr"]))
     asset.set_editor_property("accessory_traits", to_name_set(d["acc"]))
     asset.set_editor_property("is_twist_trigger", d["twist"])
-    asset.set_editor_property("button_style", d["style"])
+    # ButtonStyle enum 跳过（Python 不让 int → enum）；默认 Standard，需要 Pearl 的 doll
+    # 在 Content Browser 里手动改 ButtonStyle 字段即可
     unreal.EditorAssetLibrary.save_loaded_asset(asset)
     unreal.log(f"[ok] 创建 {d['name']}  posture={d['posture']} pearl_twist={d['twist']}")
 
