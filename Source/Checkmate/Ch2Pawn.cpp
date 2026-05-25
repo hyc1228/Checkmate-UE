@@ -175,6 +175,11 @@ bool ACh2Pawn::TryMoveTo(FIntPoint TargetCell)
 	MoveEndLoc = CellToWorld(TargetCell);
 	MoveElapsed = 0.0f;
 	bMoving = true;
+	// 通知 GameMode 触发 click ripple + 清路径预览
+	if (ACh2GameMode* GM = GetGM())
+	{
+		GM->NotifyMoveCommitted(TargetCell);
+	}
 	return true;
 }
 

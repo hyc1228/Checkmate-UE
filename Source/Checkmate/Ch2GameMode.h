@@ -196,6 +196,14 @@ protected:
 	UPROPERTY()
 	AActor* HoverMarker = nullptr;
 
+	/** Ghost pawn：hover 在合法 cell 时显示一个半透明 pawn 预览。 */
+	UPROPERTY()
+	AActor* GhostPawn = nullptr;
+
+	/** Path preview dot markers（Timelie 风路径预览）。 */
+	UPROPERTY()
+	TArray<AActor*> PathDots;
+
 	float WorldElapsed = 0.0f;
 	FIntPoint LastHoverCell = FIntPoint(-1, -1);
 
@@ -216,4 +224,12 @@ protected:
 	void ExplodePuppet(int32 PuppetIdx);
 	void RefreshPuppetVisual(FCh2PuppetState& P);
 	void UpdateHoverMarker();
+	void UpdatePathPreview(FIntPoint HoverCell, bool bValid);
+	void ClearPathPreview();
+	void SpawnClickRipple(const FVector& WorldPos);
+
+public:
+	/** Pawn 在 TryMoveTo 成功时调，触发 click ripple。 */
+	UFUNCTION(BlueprintCallable, Category="Ch2")
+	void NotifyMoveCommitted(FIntPoint TargetCell);
 };

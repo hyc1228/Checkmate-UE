@@ -486,6 +486,145 @@ void ACh2GameMode::UpdateHoverMarker()
 			MC->SetVectorParameterValueOnMaterials(TEXT("Emissive Color"), C);
 		}
 	}
+
+	// Ghost pawn 预览（仅 valid cell）
+	if (bValid)
+	{
+		if (!GhostPawn)
+		{
+			UStaticMesh* CubeM = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+			AStaticMeshActor* G = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator);
+			if (G)
+			{
+				G->SetMobility(EComponentMobility::Movable);
+				if (UStaticMeshComponent* MC = G->GetStaticMeshComponent())
+				{
+					MC->SetStaticMesh(CubeM);
+					MC->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.9f));
+					MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+					MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(1.5f, 1.5f, 1.6f));
+				}
+				GhostPawn = G;
+			}
+		}
+		if (GhostPawn)
+		{
+			GhostPawn->SetActorHiddenInGame(false);
+			const float Pulse = 0.7f + 0.3f * FMath::Sin(WorldElapsed * 5.0f);
+			GhostPawn->SetActorLocation(FVector(
+				HoverCell.X * LevelData->CellSize,
+				HoverCell.Y * LevelData->CellSize,
+				LevelData->CellSize * 0.5f + Pulse * 5.0f));
+		}
+	}
+	else if (GhostPawn)
+	{
+		GhostPawn->SetActorHiddenInGame(true);
+	}
+
+	// 路径预览
+	UpdatePathPreview(HoverCell, bValid);
+}
+
+void ACh2GameMode::UpdatePathPreview(FIntPoint HoverCell, bool bValid)
+{
+	ClearPathPreview();
+	if (!bValid || !ActivePawn || !LevelData) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UStaticMesh* DotM = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	const float CS = LevelData->CellSize;
+	const FIntPoint From = ActivePawn->GetCurrentCell();
+
+	// 收集路径点
+	TArray<FVector> Points;
+	if (ActivePawn->CurrentMode == ECh2Mode::Ballet)
+	{
+		// 直线均匀采样
+		const int32 Steps = FMath::Max(FMath::Abs(HoverCell.X - From.X), FMath::Abs(HoverCell.Y - From.Y));
+		for (int32 i = 1; i < Steps; ++i)
+		{
+			const float T = static_cast<float>(i) / Steps;
+			Points.Add(FVector(
+				FMath::Lerp((float)From.X, (float)HoverCell.X, T) * CS,
+				FMath::Lerp((float)From.Y, (float)HoverCell.Y, T) * CS,
+				12.0f));
+		}
+	}
+	else
+	{
+		// L-跳：一个 mid 点（沿 L 的拐角）+ 抛物线高度
+		const int32 Dx = HoverCell.X - From.X;
+		const int32 Dy = HoverCell.Y - From.Y;
+		const bool bLongOnX = FMath::Abs(Dx) > FMath::Abs(Dy);
+		const FIntPoint Mid = bLongOnX
+			? FIntPoint(HoverCell.X, From.Y)
+			: FIntPoint(From.X, HoverCell.Y);
+		// 4 个点 + 抛物线高度
+		for (int32 i = 1; i < 5; ++i)
+		{
+			const float T = static_cast<float>(i) / 5.0f;
+			const FVector A(From.X * CS, From.Y * CS, 12.0f);
+			const FVector M(Mid.X * CS, Mid.Y * CS, 12.0f);
+			const FVector B(HoverCell.X * CS, HoverCell.Y * CS, 12.0f);
+			// quadratic bezier through A→M→B
+			const float Inv = 1.0f - T;
+			FVector P = Inv * Inv * A + 2.0f * Inv * T * M + T * T * B;
+			P.Z += FMath::Sin(T * PI) * 60.0f;
+			Points.Add(P);
+		}
+	}
+
+	// Spawn dot actors
+	for (const FVector& P : Points)
+	{
+		AStaticMeshActor* D = World->SpawnActor<AStaticMeshActor>(P, FRotator::ZeroRotator);
+		if (!D) continue;
+		D->SetMobility(EComponentMobility::Movable);
+		if (UStaticMeshComponent* MC = D->GetStaticMeshComponent())
+		{
+			MC->SetStaticMesh(DotM);
+			MC->SetRelativeScale3D(FVector(0.15f));
+			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(1.4f, 1.4f, 1.6f));
+		}
+		PathDots.Add(D);
+	}
+}
+
+void ACh2GameMode::ClearPathPreview()
+{
+	for (AActor* A : PathDots) { if (A) A->Destroy(); }
+	PathDots.Reset();
+}
+
+void ACh2GameMode::SpawnClickRipple(const FVector& WorldPos)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UStaticMesh* CubeM = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	AStaticMeshActor* R = World->SpawnActor<AStaticMeshActor>(WorldPos + FVector(0, 0, 10), FRotator::ZeroRotator);
+	if (!R) return;
+	R->SetMobility(EComponentMobility::Movable);
+	if (UStaticMeshComponent* MC = R->GetStaticMeshComponent())
+	{
+		MC->SetStaticMesh(CubeM);
+		MC->SetRelativeScale3D(FVector(2.5f, 2.5f, 0.03f));
+		MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(2.0f, 2.0f, 2.4f));
+	}
+	R->SetLifeSpan(0.4f);
+}
+
+void ACh2GameMode::NotifyMoveCommitted(FIntPoint TargetCell)
+{
+	if (!LevelData) return;
+	const FVector P(TargetCell.X * LevelData->CellSize, TargetCell.Y * LevelData->CellSize, 5.0f);
+	SpawnClickRipple(P);
+	ClearPathPreview();
+	if (GhostPawn) GhostPawn->SetActorHiddenInGame(true);
 }
 
 void ACh2GameMode::SpawnPuppetAt(FIntPoint Cell)
