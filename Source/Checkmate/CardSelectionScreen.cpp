@@ -2,6 +2,7 @@
 
 #include "CardSelectionScreen.h"
 
+#include "AudioService.h"
 #include "CardData.h"
 #include "Ch1LocSubsystem.h"
 #include "JudgmentCardWidget.h"
@@ -265,6 +266,8 @@ void UCardSelectionScreen::RefreshConfirmEnabled()
 
 void UCardSelectionScreen::OnBeginShiftClicked()
 {
+	UAudioService::PlayCueStatic(this, FName("UI.Click"));
+
 	if (GetWorld())
 	{
 		GetWorld()->GetTimerManager().ClearTimer(CountdownTimerHandle);

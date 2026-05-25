@@ -2,6 +2,7 @@
 
 #include "MainMenuWidget.h"
 
+#include "AudioService.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Kismet/GameplayStatics.h"
@@ -84,25 +85,40 @@ void UMainMenuWidget::ApplyButtonScale(UButton* Btn, float Scale)
 
 void UMainMenuWidget::OnCh1Clicked()
 {
+	UAudioService::PlayCueStatic(this, FName("UI.Click"));
 	UGameplayStatics::OpenLevel(this, Ch1MapName);
 }
 
 void UMainMenuWidget::OnCh2Clicked()
 {
+	UAudioService::PlayCueStatic(this, FName("UI.Click"));
 	UGameplayStatics::OpenLevel(this, Ch2MapName);
 }
 
 void UMainMenuWidget::OnQuitClicked()
 {
+	UAudioService::PlayCueStatic(this, FName("UI.Click"));
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		UKismetSystemLibrary::QuitGame(this, PC, EQuitPreference::Quit, false);
 	}
 }
 
-void UMainMenuWidget::OnCh1Hovered()   { Ch1Hover = 1.0f; }
+void UMainMenuWidget::OnCh1Hovered()
+{
+	Ch1Hover = 1.0f;
+	UAudioService::PlayCueStatic(this, FName("UI.Hover"), 0.5f);
+}
 void UMainMenuWidget::OnCh1Unhovered() { Ch1Hover = 0.0f; }
-void UMainMenuWidget::OnCh2Hovered()   { Ch2Hover = 1.0f; }
+void UMainMenuWidget::OnCh2Hovered()
+{
+	Ch2Hover = 1.0f;
+	UAudioService::PlayCueStatic(this, FName("UI.Hover"), 0.5f);
+}
 void UMainMenuWidget::OnCh2Unhovered() { Ch2Hover = 0.0f; }
-void UMainMenuWidget::OnQuitHovered()  { QuitHover = 1.0f; }
+void UMainMenuWidget::OnQuitHovered()
+{
+	QuitHover = 1.0f;
+	UAudioService::PlayCueStatic(this, FName("UI.Hover"), 0.5f);
+}
 void UMainMenuWidget::OnQuitUnhovered(){ QuitHover = 0.0f; }

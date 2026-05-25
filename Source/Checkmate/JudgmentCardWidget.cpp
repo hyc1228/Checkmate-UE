@@ -2,6 +2,7 @@
 
 #include "JudgmentCardWidget.h"
 
+#include "AudioService.h"
 #include "CardData.h"
 #include "CardSelectionScreen.h"
 #include "Components/CanvasPanelSlot.h"
@@ -136,6 +137,8 @@ void UJudgmentCardWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const 
 	TargetLift = ComputeTargetLift(bIsSelected, true, HoverLiftPixels, SelectedLiftPixels);
 	TargetScale = HoverScaleMultiplier;
 
+	UAudioService::PlayCueStatic(this, FName("UI.Hover"), 0.4f);
+
 	// 把 hover 中的卡顶到最上层
 	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot))
 	{
@@ -190,6 +193,7 @@ FReply UJudgmentCardWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, c
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bPressing)
 	{
 		bPressing = false;
+		UAudioService::PlayCueStatic(this, FName("UI.Click"), 0.6f);
 		if (OwningScreen)
 		{
 			OwningScreen->HandleCardClicked(this);
