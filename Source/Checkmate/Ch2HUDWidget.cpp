@@ -61,6 +61,22 @@ void UCh2HUDWidget::ShowVictory()
 	}
 }
 
+void UCh2HUDWidget::SetMoveCounter(int32 Current, int32 Budget)
+{
+	if (!MoveCounterText) return;
+	FString Msg;
+	if (Budget > 0)
+	{
+		const int32 Remaining = FMath::Max(0, Budget - Current);
+		Msg = FString::Printf(TEXT("剩余步数 %d / %d"), Remaining, Budget);
+	}
+	else
+	{
+		Msg = FString::Printf(TEXT("步数 %d"), Current);
+	}
+	MoveCounterText->SetText(FText::FromString(Msg));
+}
+
 void UCh2HUDWidget::SetMode(ECh2Mode NewMode)
 {
 	if (!ModeText) return;

@@ -47,6 +47,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ch2|Cells", meta=(ForceInlineRow))
 	TMap<FIntPoint, ECh2CellType> Cells;
 
+	/** 步数预算（含模式切换 + 跳）。0 = 不限制；> 0 时超过即班次失败重启关卡。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ch2|Strategy", meta=(ClampMin="0"))
+	int32 MoveBudget = 0;
+
+	/** 设计师标注最优步数（仅 HUD 显示参考；不参与判定）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Ch2|Strategy", meta=(ClampMin="0"))
+	int32 OptimalMoveCount = 0;
+
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Ch2")
 	ECh2CellType GetCellType(FIntPoint Cell) const
 	{

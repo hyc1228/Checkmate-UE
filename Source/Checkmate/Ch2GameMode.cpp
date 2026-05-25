@@ -419,6 +419,13 @@ void ACh2GameMode::SetUpTopDownCamera()
 	}
 }
 
+void ACh2GameMode::RestartCh2Level()
+{
+	UE_LOG(LogTemp, Display, TEXT("Ch2: 步数超预算 — 关卡重启"));
+	UAudioService::PlayCueStatic(this, FName("Ch1.Wrong"));
+	UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this, true)));
+}
+
 void ACh2GameMode::NotifyPawnMoved(FIntPoint FromCell, FIntPoint ToCell, bool bWasClownMove)
 {
 	// 小丑日字跳后在前一 cell 留一个玩偶（如果该 cell 没特殊类型）
@@ -431,6 +438,18 @@ void ACh2GameMode::NotifyPawnMoved(FIntPoint FromCell, FIntPoint ToCell, bool bW
 
 	// 移动后重算合法 cell 高亮
 	RefreshHighlights();
+
+	// 步数预算检查（关卡 MoveBudget > 0 时启用）
+	MoveCount++;
+	if (HUDWidget) HUDWidget->SetMoveCounter(MoveCount, LevelData ? LevelData->MoveBudget : 0);
+	if (LevelData && LevelData->MoveBudget > 0 && MoveCount > LevelData->MoveBudget)
+	{
+		// 短延迟后重启（让玩家看清楚最后一步落点）
+		FTimerHandle FailTimer;
+		GetWorld()->GetTimerManager().SetTimer(FailTimer,
+			FTimerDelegate::CreateUObject(this, &ACh2GameMode::RestartCh2Level),
+			0.6f, false);
+	}
 }
 
 void ACh2GameMode::UpdateHoverMarker()

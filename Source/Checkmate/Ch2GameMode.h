@@ -164,6 +164,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch2")
 	void NotifyModeChanged();
 
+	/** 当前累计移动数。 */
+	UPROPERTY(BlueprintReadOnly, Category="Ch2|Strategy")
+	int32 MoveCount = 0;
+
+	/** 关卡失败重启（步数超预算时调）。 */
+	UFUNCTION(BlueprintCallable, Category="Ch2|Strategy")
+	void RestartCh2Level();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;

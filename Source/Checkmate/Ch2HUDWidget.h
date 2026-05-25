@@ -34,6 +34,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch2 HUD")
 	void ShowVictory();
 
+	/** 移动步数 HUD 更新（GameMode 每步调一次）。Budget=0 时只显示当前步数。 */
+	UFUNCTION(BlueprintCallable, Category="Ch2 HUD")
+	void SetMoveCounter(int32 Current, int32 Budget);
+
 	/** Ritual fade 总时长。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2 HUD")
 	float RitualDuration = 0.7f;
@@ -57,6 +61,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UTextBlock* VictoryText = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* MoveCounterText = nullptr;
 
 private:
 	float RitualElapsed = 0.0f;
