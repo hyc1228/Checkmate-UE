@@ -14,6 +14,7 @@
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
+#include "Engine/PostProcessVolume.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -292,7 +293,11 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 
 	// 分类 outcome（per judgment-card §3 Rule 7）
 	const EOutcomeClass Outcome = UJudgmentEvaluator::ClassifyOutcome(GroundTruth, bPlayerChosePass);
-	if (UJudgmentEvaluator::IsMisjudgment(Outcome)) MisjudgmentCount++;
+	if (UJudgmentEvaluator::IsMisjudgment(Outcome))
+	{
+		MisjudgmentCount++;
+		ApplyMisjudgmentPressure();
+	}
 
 	if (ToastText)
 	{
@@ -358,6 +363,47 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 			FMath::Max(0.1f, ToastHoldSeconds), false
 		);
 	}
+}
+
+void UInspectionScreen::ApplyMisjudgmentPressure()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// 第一次调用 spawn 一个全局 PP volume；之后只改它的 settings
+	if (!MisjudgmentPPVolume)
+	{
+		FActorSpawnParameters SP;
+		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		MisjudgmentPPVolume = World->SpawnActor<APostProcessVolume>(
+			FVector::ZeroVector, FRotator::ZeroRotator, SP);
+		if (MisjudgmentPPVolume)
+		{
+			MisjudgmentPPVolume->bUnbound = true;  // 整个世界都受这个 PP 影响
+			MisjudgmentPPVolume->BlendWeight = 1.0f;
+		}
+	}
+	if (!MisjudgmentPPVolume) return;
+
+	// 累积压力：vignette / chromatic / desaturation 渐进，5 次封顶
+	const float Pressure = FMath::Clamp(MisjudgmentCount / 5.0f, 0.0f, 1.0f);
+
+	FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+	PP.bOverride_VignetteIntensity = true;
+	PP.VignetteIntensity = FMath::Lerp(0.35f, 1.10f, Pressure);
+
+	PP.bOverride_SceneFringeIntensity = true;
+	PP.SceneFringeIntensity = FMath::Lerp(0.0f, 2.5f, Pressure);
+
+	PP.bOverride_ColorSaturation = true;
+	PP.ColorSaturation = FVector4(
+		FMath::Lerp(1.0f, 0.78f, Pressure),
+		FMath::Lerp(1.0f, 0.78f, Pressure),
+		FMath::Lerp(1.0f, 0.78f, Pressure),
+		1.0f);
+
+	UE_LOG(LogTemp, Verbose, TEXT("[InspectionScreen] 误判压力 %d/5 → Vignette=%.2f Saturation=%.2f"),
+		MisjudgmentCount, PP.VignetteIntensity, PP.ColorSaturation.X);
 }
 
 void UInspectionScreen::StartFeedback(bool bCorrect)

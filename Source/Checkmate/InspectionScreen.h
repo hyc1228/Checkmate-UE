@@ -13,6 +13,7 @@ class UButton;
 class UBorder;
 class ADollDisplay;
 class UCh1LocSubsystem;
+class APostProcessVolume;
 
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
@@ -192,6 +193,9 @@ private:
 	bool bHasDriftedFalsePos = false;  // 一次性：第一次 FalsePos 时 toast 漂一次
 	bool bHasDriftedFalseNeg = false;  // 一次性：第一次 FalseNeg 时 toast 漂一次
 
+	UPROPERTY()
+	APostProcessVolume* MisjudgmentPPVolume = nullptr;
+
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
 	float CurrentDollTimeRemaining = 0.0f;
@@ -214,6 +218,9 @@ private:
 	void StartFeedback(bool bCorrect);
 	void HandleDollTimeout();
 	void PushCurrentDollToActor();
+
+	/** 误判累积导致镜头 vignette↑/saturation↓（论点：判错让世界变冷）。 */
+	void ApplyMisjudgmentPressure();
 
 	void RefreshLocalizedTexts();
 	UCh1LocSubsystem* GetLoc() const;
