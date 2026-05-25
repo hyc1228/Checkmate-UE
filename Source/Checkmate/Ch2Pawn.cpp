@@ -41,6 +41,32 @@ void ACh2Pawn::BeginPlay()
 {
 	Super::BeginPlay();
 	SetMode(CurrentMode);  // 应用初始 tint
+	// Ch2 玩家默认机械眼（spec 锁定）
+	SetEyeStyle(EButtonEyeStyle::Standard);
+}
+
+void ACh2Pawn::SetEyeStyle(EButtonEyeStyle NewStyle)
+{
+	CurrentEyeStyle = NewStyle;
+	if (!EyeMarker) return;
+
+	UMaterialInterface* Mat = nullptr;
+	switch (NewStyle)
+	{
+	case EButtonEyeStyle::Pearl:    Mat = EyeMaterial_Pearl; break;
+	case EButtonEyeStyle::VeilPin:  // 没建 MI，复用 Pearl
+	case EButtonEyeStyle::Bell:
+	case EButtonEyeStyle::Standard: Mat = EyeMaterial_Pearl; break;
+	}
+	// Ch2 默认机械（spec：进 Ch2 玩家已是机械眼）。SetMode(Clown) 时也走 Mechanical。
+	if (CurrentMode == ECh2Mode::Clown || NewStyle == EButtonEyeStyle::Standard)
+	{
+		Mat = EyeMaterial_Mechanical ? EyeMaterial_Mechanical : Mat;
+	}
+	if (Mat)
+	{
+		EyeMarker->SetMaterial(0, Mat);
+	}
 }
 
 void ACh2Pawn::SetMode(ECh2Mode NewMode)
@@ -63,6 +89,9 @@ void ACh2Pawn::SetMode(ECh2Mode NewMode)
 	{
 		GM->NotifyModeChanged();
 	}
+
+	// 切 mode 同步切眼睛材质（spec：切换 ritual 取扣 → 缝扣的 Glimpse 段视效）
+	SetEyeStyle(CurrentEyeStyle);
 }
 
 ACh2GameMode* ACh2Pawn::GetGM() const

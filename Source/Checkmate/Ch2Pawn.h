@@ -3,11 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DollData.h"  // EButtonEyeStyle
 #include "GameFramework/Pawn.h"
 #include "Ch2Pawn.generated.h"
 
 class UStaticMeshComponent;
 class USceneComponent;
+class UMaterialInterface;
 class ACh2GameMode;
 
 UENUM(BlueprintType)
@@ -89,6 +91,22 @@ public:
 	/** 一次移动的 lerp 时长（秒）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0.05"))
 	float MoveDuration = 0.22f;
+
+	/** 按扣眼材质（spec：芭蕾模式 = 按扣眼 / 珍珠暖白）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|EyeMotif")
+	UMaterialInterface* EyeMaterial_Pearl = nullptr;
+
+	/** 机械眼材质（spec：小丑模式 / 翻转后 = 机械眼 蓝紫 emissive）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|EyeMotif")
+	UMaterialInterface* EyeMaterial_Mechanical = nullptr;
+
+	/** 当前 ButtonStyle —— Ch2 的 setup 默认 Mechanical（spec 锁定 Ch2 玩家=机械眼）。 */
+	UPROPERTY(BlueprintReadOnly, Category="Ch2|EyeMotif")
+	EButtonEyeStyle CurrentEyeStyle = EButtonEyeStyle::Standard;
+
+	/** 切换 EyeMarker 材质（Twist 拍点 / Pickup 切换都调）。 */
+	UFUNCTION(BlueprintCallable, Category="Ch2|EyeMotif")
+	void SetEyeStyle(EButtonEyeStyle NewStyle);
 
 protected:
 	virtual void BeginPlay() override;

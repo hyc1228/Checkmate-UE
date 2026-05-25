@@ -73,3 +73,17 @@ EJudgmentVerdict UJudgmentEvaluator::EvaluateDoll(
 
 	return EJudgmentVerdict::Pass;
 }
+
+EOutcomeClass UJudgmentEvaluator::ClassifyOutcome(EJudgmentVerdict ObjectiveVerdict, bool bPlayerAcceptedDoll)
+{
+	const bool bObjectivePass = (ObjectiveVerdict == EJudgmentVerdict::Pass);
+	if (bPlayerAcceptedDoll && bObjectivePass)   return EOutcomeClass::TruePositive;
+	if (!bPlayerAcceptedDoll && !bObjectivePass) return EOutcomeClass::TrueNegative;
+	if (bPlayerAcceptedDoll && !bObjectivePass)  return EOutcomeClass::FalsePositive;
+	return EOutcomeClass::FalseNegative;
+}
+
+bool UJudgmentEvaluator::IsMisjudgment(EOutcomeClass Outcome)
+{
+	return Outcome == EOutcomeClass::FalsePositive || Outcome == EOutcomeClass::FalseNegative;
+}

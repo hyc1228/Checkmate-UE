@@ -248,7 +248,48 @@ void AChapter1GameMode::ShowShiftTransition(int32 NextShiftIdx)
 void AChapter1GameMode::FinishCh1()
 {
 	UE_LOG(LogTemp, Display, TEXT("Chapter1: 全部 %d 班完成 — Ch1 结束"), Shifts.Num());
-	// TODO Tier B/C：触发 twist 演出 / 切 Ch2
+	// 走完所有班次仍未触发 twist（玩家从未放行 Pearl 完美娃娃）→ 兜底也跳 Ch2
+	if (!bTwistTriggered)
+	{
+		RequestTwist();
+	}
+}
+
+void AChapter1GameMode::RequestTwist()
+{
+	if (bTwistTriggered) return;  // 防重入
+	bTwistTriggered = true;
+
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: ★ Twist triggered — Ch1→Ch2 翻转拍点"));
+
+	// 音频：钟铃 + 切换 ritual cue
+	UAudioService::PlayCueStatic(this, FName("Ch2.Ritual"));
+
+	// Fade-to-white：用 PlayerController CameraFade
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+	{
+		PC->PlayerCameraManager->StartCameraFade(
+			0.0f, 1.0f, TwistFadeSeconds, FLinearColor::White,
+			/*bShouldFadeAudio=*/false, /*bHoldWhenFinished=*/true);
+	}
+
+	// 优先播 Ch2.Intro sequence（如果 BP 里配了）
+	// 不阻塞——HoldTimer 到时直接 OpenLevel，无 sequence 也 OK
+
+	// HoldTimer：fade + hold 后跳 Ch2
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			TwistHoldTimer,
+			FTimerDelegate::CreateUObject(this, &AChapter1GameMode::OpenCh2Map),
+			TwistFadeSeconds + TwistHoldSeconds, false);
+	}
+}
+
+void AChapter1GameMode::OpenCh2Map()
+{
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: OpenLevel(%s)"), *Ch2MapName.ToString());
+	UGameplayStatics::OpenLevel(this, Ch2MapName);
 }
 
 void AChapter1GameMode::SetUIInputMode()

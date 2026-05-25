@@ -7,6 +7,22 @@
 #include "DollData.generated.h"
 
 /**
+ * 娃娃眼睛 / 按扣的视觉签名（视觉锚点；eye-state GDD §8）。
+ *   Pearl   : 经典珍珠按扣眼（默认）
+ *   Bell    : 铃铛眼（少见）
+ *   VeilPin : 头纱别针眼（最稀有）
+ *   Standard: 标准眼（白底）
+ */
+UENUM(BlueprintType)
+enum class EButtonEyeStyle : uint8
+{
+	Standard UMETA(DisplayName="Standard"),
+	Pearl    UMETA(DisplayName="Pearl"),
+	Bell     UMETA(DisplayName="Bell"),
+	VeilPin  UMETA(DisplayName="VeilPin"),
+};
+
+/**
  * 单只娃娃的属性集 DataAsset（灰盒：纯数据，灯盒阶段无 mesh / 无表情贴图）。
  *
  * 与 UCardData 的对应关系：
@@ -53,4 +69,15 @@ public:
 	/** 多值：珍珠项链 / 头纱 / 围裙 / 缎带 / 白手套 的子集。 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Attributes")
 	TSet<FName> AccessoryTraits;
+
+	// ── 视觉签名 + 翻转触发 ─────────────────────────────────────────────────
+
+	/** 按扣眼视觉风格（Pearl / Bell / VeilPin / Standard）。Pearl 是翻转拍点的"完美贴合"主路径。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|EyeMotif")
+	EButtonEyeStyle ButtonStyle = EButtonEyeStyle::Standard;
+
+	/** 翻转触发：放行该娃娃 + 客观 IsConforming=true 即 fire Ch1→Ch2 twist。
+	 *  per judgment-card.md §3 Rule 9：通常仅 Shift 4 的 Pearl-perfect 那一只配 true。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|EyeMotif")
+	bool bIsTwistTrigger = false;
 };

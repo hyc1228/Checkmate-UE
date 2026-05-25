@@ -5,6 +5,7 @@
 #include "AudioService.h"
 #include "CardData.h"
 #include "Ch1LocSubsystem.h"
+#include "Chapter1GameMode.h"
 #include "DollData.h"
 #include "DollDisplay.h"
 #include "JudgmentEvaluator.h"
@@ -14,6 +15,7 @@
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
 namespace
@@ -306,6 +308,17 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 	}
 
 	StartFeedback(bPlayerCorrect);
+
+	// Twist 触发：玩家放行 + 客观符合 + 该娃娃配了 Pearl trigger
+	if (bPlayerChosePass
+		&& GroundTruth == EJudgmentVerdict::Pass
+		&& Doll && Doll->bIsTwistTrigger)
+	{
+		if (AChapter1GameMode* GM = Cast<AChapter1GameMode>(UGameplayStatics::GetGameMode(this)))
+		{
+			GM->RequestTwist();
+		}
+	}
 
 	bAwaitingNext = true;
 	SetButtonsEnabled(false);

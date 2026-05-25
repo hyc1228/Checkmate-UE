@@ -98,6 +98,28 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Shifts", meta=(ClampMin="0.5"))
 	float TransitionHoldSeconds = 2.5f;
 
+	// ── Twist (Ch1 → Ch2 翻转) ──────────────────────────────────────────────
+
+	/** 翻转目标关卡（默认 Ch2Test）。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Twist")
+	FName Ch2MapName = TEXT("Ch2Test");
+
+	/** 翻转 fade-to-white 时长（秒）。lean PV 版 ≈ 1.5s。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Twist", meta=(ClampMin="0.5"))
+	float TwistFadeSeconds = 1.5f;
+
+	/** 翻转后停顿（秒），然后 OpenLevel(Ch2)。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Twist", meta=(ClampMin="0.0"))
+	float TwistHoldSeconds = 2.0f;
+
+	/** 是否处于翻转触发态（避免重复 fire）。 */
+	UPROPERTY(BlueprintReadOnly, Category="Ch1|Twist")
+	bool bTwistTriggered = false;
+
+	/** 当玩家放行了带 bIsTwistTrigger=true 的 Pearl 娃娃时 fire。 */
+	UFUNCTION(BlueprintCallable, Category="Ch1|Twist")
+	void RequestTwist();
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -126,4 +148,7 @@ private:
 	void ShowShiftTransition(int32 NextShiftIdx);
 	void FinishCh1();
 	void SetUIInputMode();
+
+	void OpenCh2Map();
+	FTimerHandle TwistHoldTimer;
 };
