@@ -2,6 +2,7 @@
 
 #include "Ch2GameMode.h"
 
+#include "AudioService.h"
 #include "Ch2HUDWidget.h"
 #include "Ch2Pawn.h"
 
@@ -63,6 +64,8 @@ void ACh2GameMode::BeginPlay()
 
 	BuildLevel();
 	SetUpTopDownCamera();
+
+	UAudioService::PlayCueStatic(this, FName("Amb.Ch2"));  // 进 Ch2 开 ambient（如 CueTable 里有）
 }
 
 ECh2CellType ACh2GameMode::GetCellType(FIntPoint Cell) const
@@ -631,6 +634,7 @@ void ACh2GameMode::SpawnClickRipple(const FVector& WorldPos)
 void ACh2GameMode::NotifyMoveCommitted(FIntPoint TargetCell)
 {
 	if (!LevelData) return;
+	UAudioService::PlayCueStatic(this, FName("Ch2.Move"));
 	const FVector P(TargetCell.X * LevelData->CellSize, TargetCell.Y * LevelData->CellSize, 5.0f);
 	SpawnClickRipple(P);
 	ClearPathPreview();
@@ -719,6 +723,8 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 
 	UE_LOG(LogTemp, Display, TEXT("Ch2: 爆炸玩偶 BOOM @ (%d,%d)"), P.Cell.X, P.Cell.Y);
 
+	UAudioService::PlayCueStatic(this, FName("Ch2.Explode"));
+
 	// 优先播 Ch2.Explosion sequence；总是叠加 camera shake + flash 球（即时反馈）
 	TryPlaySequence(TEXT("Ch2.Explosion"));
 	ShakeElapsed = 0.0f;
@@ -778,6 +784,7 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 
 	if (Type == ECh2CellType::ClownPickup)
 	{
+		UAudioService::PlayCueStatic(this, FName("Ch2.Ritual"));
 		// 优先播 Ch2.Pickup sequence；fallback UMG fade
 		if (!TryPlaySequence(TEXT("Ch2.Pickup")) && HUDWidget)
 		{
@@ -798,6 +805,7 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 	else if (Type == ECh2CellType::Exit)
 	{
 		UE_LOG(LogTemp, Display, TEXT("Ch2: 抵达出口 — Ch2 Complete"));
+		UAudioService::PlayCueStatic(this, FName("Ch2.Victory"));
 		// 优先播 Ch2.Victory sequence；fallback UMG victory screen
 		if (!TryPlaySequence(TEXT("Ch2.Victory")) && HUDWidget)
 		{

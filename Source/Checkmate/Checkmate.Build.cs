@@ -15,8 +15,12 @@ public class Checkmate : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Slate", "SlateCore",  // For FWidgetTransform / advanced UMG features
-			"LevelSequence", "MovieScene", "MovieSceneTracks"  // Cinematic sequence integration
+			"LevelSequence", "MovieScene", "MovieSceneTracks",  // Cinematic sequence integration
+			"FMODStudio"  // 音频中间件；插件在 Plugins/FMODStudio/
 		});
+
+		// FMOD 路径启用——AudioService.cpp 内 #if WITH_FMOD_CHECKMATE 块会被编译
+		PublicDefinitions.Add("WITH_FMOD_CHECKMATE=1");
 
 		// Editor-only：关卡编辑器 EUW 需要 Blutility（UEditorUtilityWidget）+
 		// UnrealEd（UEditorAssetLibrary / asset save）。Shipping build 不打包。

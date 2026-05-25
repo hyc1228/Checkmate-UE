@@ -2,6 +2,7 @@
 
 #include "DollDisplay.h"
 
+#include "AudioService.h"
 #include "DollData.h"
 #include "InspectionScreen.h"
 
@@ -327,6 +328,8 @@ void ADollDisplay::EnterTossing()
 	const float BackX = -TossUpwardDistance * 0.4f;
 	AnimEndLoc = AnimStartLoc + FVector(BackX, LateralY, TossUpwardDistance);
 
+	UAudioService::PlayCueStatic(this, FName("Ch1.Toss"));
+
 	// 印章留在原地：记录当前世界位（toss 期间会保持在此）
 	if (OwningScreen)
 	{
@@ -341,6 +344,8 @@ void ADollDisplay::EnterConfirming()
 	AnimElapsed = 0.0f;
 	AnimStartLoc = GetActorLocation();
 	AnimEndLoc = AnimStartLoc + FVector(0.0f, ConfirmExitDistanceY, 0.0f);
+
+	UAudioService::PlayCueStatic(this, FName("Ch1.Stamp"));
 
 	if (OwningScreen)
 	{

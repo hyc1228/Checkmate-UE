@@ -21,6 +21,12 @@ Build/
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
 
+# FMOD plugin（376M 体积，新机器从官网重新解压即可，setup 步骤见 docs/Audio-Spec.md）
+Plugins/FMODStudio/
+Plugins/FMODStudioNiagara/
+Plugins/FMODStudioOpenXR/
+Plugins/FMOD-README.md
+
 # 日志与临时文件
 *.log
 *.tlog

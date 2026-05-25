@@ -2,6 +2,7 @@
 
 #include "Chapter1GameMode.h"
 
+#include "AudioService.h"
 #include "CardData.h"
 #include "CardSelectionScreen.h"
 #include "Ch1LocSubsystem.h"
@@ -31,6 +32,8 @@ AChapter1GameMode::AChapter1GameMode()
 void AChapter1GameMode::BeginPlay()
 {
 	Super::BeginPlay();
+
+	UAudioService::PlayCueStatic(this, FName("Amb.Ch1"));
 
 	if (Shifts.Num() == 0)
 	{

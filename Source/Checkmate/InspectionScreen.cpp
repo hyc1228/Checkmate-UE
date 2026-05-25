@@ -2,6 +2,7 @@
 
 #include "InspectionScreen.h"
 
+#include "AudioService.h"
 #include "CardData.h"
 #include "Ch1LocSubsystem.h"
 #include "DollData.h"
@@ -330,6 +331,8 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 
 void UInspectionScreen::StartFeedback(bool bCorrect)
 {
+	UAudioService::PlayCueStatic(this, bCorrect ? FName("Ch1.Correct") : FName("Ch1.Wrong"));
+
 	// 闪屏
 	FlashElapsed = 0.0f;
 	FlashTotal = FlashDurationSec;
