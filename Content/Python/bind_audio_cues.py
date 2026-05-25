@@ -18,6 +18,8 @@ KEY_TO_ASSET = {
     "Ch2.Victory": "Ch2_Victory",
     "UI.Click":    "UI_Click",
     "UI.Hover":    "UI_Hover",
+    "Amb.Ch1":     "Amb_Ch1",
+    "Amb.Ch2":     "Amb_Ch2",
 }
 
 da = unreal.EditorAssetLibrary.load_asset(DA_PATH)

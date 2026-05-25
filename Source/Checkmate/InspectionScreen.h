@@ -14,6 +14,7 @@ class UBorder;
 class ADollDisplay;
 class UCh1LocSubsystem;
 class APostProcessVolume;
+class UMaterialInterface;
 
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
@@ -212,6 +213,8 @@ private:
 	int32 TrueAcceptCount = 0;
 	int32 TrueRejectCount = 0;
 	bool bAwaitingNext = false;
+	bool bShiftEnded = false;
+	FTimerHandle ShiftEndTimer;
 
 	// 误判统计 + 文案漂移 state
 	int32 MisjudgmentCount = 0;
@@ -225,12 +228,20 @@ private:
 	UPROPERTY()
 	TArray<AActor*> DeskCardActors;
 
-	/** 桌面纸卡 spawn 起点（左前方桌面），右移每张 100 unit。 */
+	/** 桌面纸卡 spawn 起点（doll 前方下方）。Y 方向是相机左右展开方向。 */
 	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
-	FVector DeskCardOrigin = FVector(-180.0f, -180.0f, 15.0f);
+	FVector DeskCardOrigin = FVector(-30.0f, -240.0f, 40.0f);
 
 	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
-	float DeskCardSpacing = 95.0f;
+	float DeskCardSpacing = 90.0f;
+
+	/** 卡的"立起来"旋转（默认 Pitch=-90 让 plane normal 朝相机 -X 方向）。 */
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
+	FRotator DeskCardRotation = FRotator(-90.0f, 0.0f, 0.0f);
+
+	/** 桌面纸卡 emissive 材质（绑 M_Highlight 让卡发光显眼）。 */
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
+	UMaterialInterface* DeskCardMaterial = nullptr;
 
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
@@ -261,6 +272,9 @@ private:
 	/** Spawn/refresh 桌面 K 张 3D 纸卡（diegetic 标准）。 */
 	void SpawnDeskCards();
 	void ClearDeskCards();
+
+	/** 立即检查本班是否该终止（成功/失败）。返回 true 表示已 schedule 终止 broadcast。 */
+	bool CheckShiftTermination();
 
 	void RefreshLocalizedTexts();
 	UCh1LocSubsystem* GetLoc() const;

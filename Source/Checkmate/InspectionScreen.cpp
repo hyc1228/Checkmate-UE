@@ -63,6 +63,7 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	bHasDriftedFalsePos = false;
 	bHasDriftedFalseNeg = false;
 	bAwaitingNext = false;
+	bShiftEnded = false;
 
 	SpawnDeskCards();
 }
@@ -350,6 +351,15 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 
 	StartFeedback(bPlayerCorrect);
 
+	// 班次终止实时检查（不再等动画完成）
+	if (CheckShiftTermination())
+	{
+		bAwaitingNext = true;
+		SetButtonsEnabled(false);
+		if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
+		return;
+	}
+
 	// Twist 触发：玩家放行 + 客观符合 + 该娃娃配了 Pearl trigger
 	if (bPlayerChosePass
 		&& GroundTruth == EJudgmentVerdict::Pass
@@ -381,6 +391,78 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 			FMath::Max(0.1f, ToastHoldSeconds), false
 		);
 	}
+}
+
+bool UInspectionScreen::CheckShiftTermination()
+{
+	if (bShiftEnded) return true;
+
+	const bool bUseQuota = (PassQuota > 0 || RejectQuota > 0);
+
+	// 失败：误判超上限
+	if (MaxMisjudgmentsBeforeFail > 0 && MisjudgmentCount >= MaxMisjudgmentsBeforeFail)
+	{
+		bShiftEnded = true;
+		UE_LOG(LogTemp, Display, TEXT("[InspectionScreen] ★ 班次失败：误判 %d/%d"), MisjudgmentCount, MaxMisjudgmentsBeforeFail);
+
+		if (ToastText)
+		{
+			ToastText->SetText(FText::FromString(FString::Printf(
+				TEXT("★ 班次失败 — 误判 %d / %d 次\n重新组装判据"),
+				MisjudgmentCount, MaxMisjudgmentsBeforeFail)));
+		}
+
+		FShiftResult R;
+		R.TotalDolls = CurrentDollIndex + 1;
+		R.CorrectCount = CorrectCount;
+		R.WrongCount = WrongCount;
+		R.TrueAcceptCount = TrueAcceptCount;
+		R.TrueRejectCount = TrueRejectCount;
+		R.bSuccess = false;
+		if (GetWorld())
+		{
+			GetWorld()->GetTimerManager().SetTimer(ShiftEndTimer,
+				FTimerDelegate::CreateLambda([this, R]() {
+					OnShiftCompleted.Broadcast(R);
+				}), 1.8f, false);
+		}
+		return true;
+	}
+
+	// 成功
+	const bool bDone = bUseQuota
+		? (TrueAcceptCount >= PassQuota && TrueRejectCount >= RejectQuota)
+		: (CorrectCount >= CorrectGoal);
+	if (bDone)
+	{
+		bShiftEnded = true;
+		UE_LOG(LogTemp, Display, TEXT("[InspectionScreen] ★ 班次完成：TP=%d TN=%d"), TrueAcceptCount, TrueRejectCount);
+
+		if (ToastText)
+		{
+			ToastText->SetText(FText::FromString(FString::Printf(
+				TEXT("✓ 班次完成 — 放行 %d / 丢弃 %d"),
+				TrueAcceptCount, TrueRejectCount)));
+		}
+
+		FShiftResult R;
+		R.TotalDolls = CurrentDollIndex + 1;
+		R.CorrectCount = CorrectCount;
+		R.WrongCount = WrongCount;
+		R.TrueAcceptCount = TrueAcceptCount;
+		R.TrueRejectCount = TrueRejectCount;
+		R.bSuccess = true;
+		if (GetWorld())
+		{
+			GetWorld()->GetTimerManager().SetTimer(ShiftEndTimer,
+				FTimerDelegate::CreateLambda([this, R]() {
+					OnShiftCompleted.Broadcast(R);
+				}), 1.8f, false);
+		}
+		return true;
+	}
+
+	return false;
 }
 
 void UInspectionScreen::ApplyMisjudgmentPressure()
@@ -463,41 +545,8 @@ void UInspectionScreen::AdvanceToNextDoll()
 		ToastText->SetText(FText::GetEmpty());
 	}
 
-	// 班次失败：误判超上限
-	if (MaxMisjudgmentsBeforeFail > 0 && MisjudgmentCount >= MaxMisjudgmentsBeforeFail)
-	{
-		FShiftResult Result;
-		Result.TotalDolls = CurrentDollIndex;
-		Result.CorrectCount = CorrectCount;
-		Result.WrongCount = WrongCount;
-		Result.TrueAcceptCount = TrueAcceptCount;
-		Result.TrueRejectCount = TrueRejectCount;
-		Result.bSuccess = false;
-		UE_LOG(LogTemp, Display, TEXT("[InspectionScreen] 班次失败：误判 %d >= 上限 %d"), MisjudgmentCount, MaxMisjudgmentsBeforeFail);
-		SetButtonsEnabled(false);
-		OnShiftCompleted.Broadcast(Result);
-		return;
-	}
-
-	// 班次完成：优先用配额制度（PassQuota + RejectQuota 都 > 0）；否则用 CorrectGoal
-	const bool bUseQuota = (PassQuota > 0 && RejectQuota > 0);
-	const bool bShiftDone = bUseQuota
-		? (TrueAcceptCount >= PassQuota && TrueRejectCount >= RejectQuota)
-		: (CorrectCount >= CorrectGoal);
-	if (bShiftDone)
-	{
-		FShiftResult Result;
-		Result.TotalDolls = CurrentDollIndex;
-		Result.CorrectCount = CorrectCount;
-		Result.WrongCount = WrongCount;
-		Result.TrueAcceptCount = TrueAcceptCount;
-		Result.TrueRejectCount = TrueRejectCount;
-		Result.bSuccess = true;
-
-		SetButtonsEnabled(false);
-		OnShiftCompleted.Broadcast(Result);
-		return;
-	}
+	// 班次终止已由 HandlePlayerChoice 即时检测；这里不再 broadcast，避免双触发
+	if (bShiftEnded) { return; }
 
 	SetButtonsEnabled(true);
 	RenderCurrentDoll();
@@ -635,24 +684,29 @@ void UInspectionScreen::SpawnDeskCards()
 		const UCardData* Card = JudgmentCards[i];
 		if (!Card) continue;
 
+		// 在 doll 前方排开（X≈-30），Y 方向 spread 让相机视野能看见
 		const FVector Loc = DeskCardOrigin + FVector(0.0f, i * DeskCardSpacing, 0.0f);
-		// 卡面朝上，绕 Z 轻微随机旋转一点（自然摆放感）
-		const FRotator Rot(0.0f, 0.0f, 0.0f);
 
 		FActorSpawnParameters SP;
 		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		AStaticMeshActor* Card3D = World->SpawnActor<AStaticMeshActor>(Loc, Rot, SP);
+		AStaticMeshActor* Card3D = World->SpawnActor<AStaticMeshActor>(Loc, DeskCardRotation, SP);
 		if (!Card3D) continue;
 
 		Card3D->SetMobility(EComponentMobility::Movable);
 		if (UStaticMeshComponent* MC = Card3D->GetStaticMeshComponent())
 		{
 			MC->SetStaticMesh(PlaneMesh);
-			// 标准扑克牌比例 ~ 0.7×1.0；Plane 原始 1×1 -> 缩到 0.6×0.85，约 60×85 unit
+			// 立起来的纸卡：80×60 unit（高×宽）
 			MC->SetRelativeScale3D(FVector(0.6f, 0.85f, 1.0f));
 			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			// emissive material 让卡发光显眼（M_Highlight 已带 Color + Intensity 参数）
+			if (DeskCardMaterial)
+			{
+				MC->SetMaterial(0, DeskCardMaterial);
+			}
 			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), ColorForDim(Card->Dimension));
 			MC->SetVectorParameterValueOnMaterials(TEXT("BaseColor"), ColorForDim(Card->Dimension));
+			MC->SetScalarParameterValueOnMaterials(TEXT("Intensity"), 2.5f);
 		}
 		DeskCardActors.Add(Card3D);
 	}
