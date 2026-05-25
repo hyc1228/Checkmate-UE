@@ -15,7 +15,10 @@
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
 #include "Engine/PostProcessVolume.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
@@ -55,6 +58,8 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	CorrectCount = 0;
 	WrongCount = 0;
 	bAwaitingNext = false;
+
+	SpawnDeskCards();
 }
 
 void UInspectionScreen::SetDollActor(ADollDisplay* InActor)
@@ -160,6 +165,8 @@ void UInspectionScreen::NativeDestruct()
 		GetWorld()->GetTimerManager().ClearTimer(AdvanceTimerHandle);
 		GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
 	}
+
+	ClearDeskCards();
 
 	if (PassButton)   PassButton->OnClicked.RemoveAll(this);
 	if (RejectButton) RejectButton->OnClicked.RemoveAll(this);
@@ -554,4 +561,67 @@ void UInspectionScreen::SetButtonsEnabled(bool bEnabled)
 {
 	if (PassButton)   PassButton->SetIsEnabled(bEnabled);
 	if (RejectButton) RejectButton->SetIsEnabled(bEnabled);
+}
+
+// ── 3D 桌面纸卡（diegetic 标准）─────────────────────────────────────────────
+
+void UInspectionScreen::ClearDeskCards()
+{
+	for (AActor* A : DeskCardActors)
+	{
+		if (A) A->Destroy();
+	}
+	DeskCardActors.Reset();
+}
+
+void UInspectionScreen::SpawnDeskCards()
+{
+	ClearDeskCards();
+	UWorld* World = GetWorld();
+	if (!World || JudgmentCards.Num() == 0) return;
+
+	UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	if (!PlaneMesh) return;
+
+	// 维度配色（论点：玩家看见自己选的 4 类标准，从颜色可分辨）
+	auto ColorForDim = [](ECardDimension D) -> FVector
+	{
+		switch (D)
+		{
+		case ECardDimension::Posture:    return FVector(0.95f, 0.85f, 0.45f); // 暖黄（姿态）
+		case ECardDimension::Hair:       return FVector(0.55f, 0.40f, 0.30f); // 棕（发型）
+		case ECardDimension::Expression: return FVector(0.85f, 0.45f, 0.45f); // 红（表情）
+		case ECardDimension::Accessory:  return FVector(0.55f, 0.65f, 0.85f); // 蓝（饰物）
+		}
+		return FVector(0.9f);
+	};
+
+	for (int32 i = 0; i < JudgmentCards.Num(); ++i)
+	{
+		const UCardData* Card = JudgmentCards[i];
+		if (!Card) continue;
+
+		const FVector Loc = DeskCardOrigin + FVector(0.0f, i * DeskCardSpacing, 0.0f);
+		// 卡面朝上，绕 Z 轻微随机旋转一点（自然摆放感）
+		const FRotator Rot(0.0f, 0.0f, 0.0f);
+
+		FActorSpawnParameters SP;
+		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AStaticMeshActor* Card3D = World->SpawnActor<AStaticMeshActor>(Loc, Rot, SP);
+		if (!Card3D) continue;
+
+		Card3D->SetMobility(EComponentMobility::Movable);
+		if (UStaticMeshComponent* MC = Card3D->GetStaticMeshComponent())
+		{
+			MC->SetStaticMesh(PlaneMesh);
+			// 标准扑克牌比例 ~ 0.7×1.0；Plane 原始 1×1 -> 缩到 0.6×0.85，约 60×85 unit
+			MC->SetRelativeScale3D(FVector(0.6f, 0.85f, 1.0f));
+			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), ColorForDim(Card->Dimension));
+			MC->SetVectorParameterValueOnMaterials(TEXT("BaseColor"), ColorForDim(Card->Dimension));
+		}
+		DeskCardActors.Add(Card3D);
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("[InspectionScreen] 桌面 spawn 了 %d 张 3D 纸卡"), DeskCardActors.Num());
 }

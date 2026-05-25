@@ -196,6 +196,17 @@ private:
 	UPROPERTY()
 	APostProcessVolume* MisjudgmentPPVolume = nullptr;
 
+	/** 桌面 3D 纸卡 actors（diegetic 标准卡，让玩家在 3D 检验时看见自己选的判据）。 */
+	UPROPERTY()
+	TArray<AActor*> DeskCardActors;
+
+	/** 桌面纸卡 spawn 起点（左前方桌面），右移每张 100 unit。 */
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
+	FVector DeskCardOrigin = FVector(-180.0f, -180.0f, 15.0f);
+
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
+	float DeskCardSpacing = 95.0f;
+
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
 	float CurrentDollTimeRemaining = 0.0f;
@@ -221,6 +232,10 @@ private:
 
 	/** 误判累积导致镜头 vignette↑/saturation↓（论点：判错让世界变冷）。 */
 	void ApplyMisjudgmentPressure();
+
+	/** Spawn/refresh 桌面 K 张 3D 纸卡（diegetic 标准）。 */
+	void SpawnDeskCards();
+	void ClearDeskCards();
 
 	void RefreshLocalizedTexts();
 	UCh1LocSubsystem* GetLoc() const;
