@@ -149,6 +149,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch2|Visual")
 	FLinearColor HighlightColor = FLinearColor(0.2f, 0.95f, 1.0f, 1.0f);
 
+	/** 高亮 / ghost / 路径点 / ripple 共用的发光材质（M_Highlight）。
+	 *  暴露 Color + Intensity 参数。留空则用默认 cube material（看上去暗）。 */
+	UPROPERTY(EditDefaultsOnly, Category="Ch2|Visual")
+	UMaterialInterface* EmissiveMaterial = nullptr;
+
 	/** HUD widget class（继承 UCh2HUDWidget）。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch2|Classes")
 	TSubclassOf<UCh2HUDWidget> Ch2HUDClass;

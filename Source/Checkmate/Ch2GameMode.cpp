@@ -364,11 +364,15 @@ void ACh2GameMode::RefreshHighlights()
 			// 厚度 0.15 = 15unit，可见的薄板
 			MC->SetRelativeScale3D(FVector(CS / 100.0f * 0.85f, CS / 100.0f * 0.85f, 0.15f));
 			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			// 多个材质参数名（BasicShapeMaterial 用 "Color"；MaterialBaseColor 也试一下）
-			const FVector EmColor(HighlightColor.R * 3.0f, HighlightColor.G * 3.0f, HighlightColor.B * 3.0f);
+			// 配了 M_Highlight 就 swap，参数 "Color" 直接控发光
+			if (EmissiveMaterial)
+			{
+				MC->SetMaterial(0, EmissiveMaterial);
+			}
+			const FVector EmColor(HighlightColor.R, HighlightColor.G, HighlightColor.B);
 			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), EmColor);
 			MC->SetVectorParameterValueOnMaterials(TEXT("Emissive Color"), EmColor);
-			MC->SetVectorParameterValueOnMaterials(TEXT("BaseColor"), FVector(HighlightColor.R, HighlightColor.G, HighlightColor.B));
+			MC->SetVectorParameterValueOnMaterials(TEXT("BaseColor"), EmColor);
 		}
 		HighlightMarkers.Add(A);
 	}
@@ -502,7 +506,9 @@ void ACh2GameMode::UpdateHoverMarker()
 					MC->SetStaticMesh(CubeM);
 					MC->SetRelativeScale3D(FVector(0.55f, 0.55f, 0.9f));
 					MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-					MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(1.5f, 1.5f, 1.6f));
+					if (EmissiveMaterial) MC->SetMaterial(0, EmissiveMaterial);
+					MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(0.85f, 0.85f, 0.95f));
+					MC->SetScalarParameterValueOnMaterials(TEXT("Intensity"), 2.5f);
 				}
 				GhostPawn = G;
 			}
@@ -588,7 +594,9 @@ void ACh2GameMode::UpdatePathPreview(FIntPoint HoverCell, bool bValid)
 			MC->SetStaticMesh(DotM);
 			MC->SetRelativeScale3D(FVector(0.15f));
 			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(1.4f, 1.4f, 1.6f));
+			if (EmissiveMaterial) MC->SetMaterial(0, EmissiveMaterial);
+			MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(HighlightColor.R, HighlightColor.G, HighlightColor.B));
+			MC->SetScalarParameterValueOnMaterials(TEXT("Intensity"), 5.0f);
 		}
 		PathDots.Add(D);
 	}
@@ -613,7 +621,9 @@ void ACh2GameMode::SpawnClickRipple(const FVector& WorldPos)
 		MC->SetStaticMesh(CubeM);
 		MC->SetRelativeScale3D(FVector(2.5f, 2.5f, 0.03f));
 		MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(2.0f, 2.0f, 2.4f));
+		if (EmissiveMaterial) MC->SetMaterial(0, EmissiveMaterial);
+		MC->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(HighlightColor.R, HighlightColor.G, HighlightColor.B));
+		MC->SetScalarParameterValueOnMaterials(TEXT("Intensity"), 8.0f);
 	}
 	R->SetLifeSpan(0.4f);
 }
