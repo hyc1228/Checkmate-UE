@@ -70,12 +70,10 @@ def to_name_set(strs):
 
 for d in NEW_DOLLS:
     dst = f"{DOLL_DIR}/{d['name']}"
-    if unreal.EditorAssetLibrary.does_asset_exist(dst):
-        unreal.log(f"[skip] {d['name']} 已存在")
-        continue
-    if not unreal.EditorAssetLibrary.duplicate_asset(TEMPLATE, dst):
-        unreal.log_error(f"[fail] 复制 {d['name']} 失败")
-        continue
+    if not unreal.EditorAssetLibrary.does_asset_exist(dst):
+        if not unreal.EditorAssetLibrary.duplicate_asset(TEMPLATE, dst):
+            unreal.log_error(f"[fail] 复制 {d['name']} 失败")
+            continue
     asset = unreal.EditorAssetLibrary.load_asset(dst)
     if not asset:
         unreal.log_error(f"[fail] 加载新 {d['name']} 失败")
@@ -85,7 +83,7 @@ for d in NEW_DOLLS:
     asset.set_editor_property("hair_traits", to_name_set(d["hair"]))
     asset.set_editor_property("expression_traits", to_name_set(d["expr"]))
     asset.set_editor_property("accessory_traits", to_name_set(d["acc"]))
-    asset.set_editor_property("b_is_twist_trigger", d["twist"])
+    asset.set_editor_property("is_twist_trigger", d["twist"])
     asset.set_editor_property("button_style", d["style"])
     unreal.EditorAssetLibrary.save_loaded_asset(asset)
     unreal.log(f"[ok] 创建 {d['name']}  posture={d['posture']} pearl_twist={d['twist']}")
