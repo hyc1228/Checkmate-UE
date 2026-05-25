@@ -29,40 +29,40 @@ struct FShiftConfig
 	GENERATED_BODY()
 
 	/** 这一班可选卡池（≥ K 张）。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift")
 	TArray<UCardData*> PoolCards;
 
 	/** 娃娃池——按顺序循环（达 N 后回到 0）。班次以 CorrectGoal 为终止条件，而非用完池。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift")
 	TArray<UDollData*> DollSequence;
 
 	/** 玩家要选几张卡（≤ PoolCards.Num()）。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="1"))
 	int32 K = 3;
 
 	/** 本班需要正确判定多少次才下班（不论丢弃了多少错的）。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="1"))
 	int32 CorrectGoal = 3;
 
 	/** 选卡屏倒计时（秒）。到时强制开始（用未选卡顺序补齐）。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="1.0"))
 	float AssemblyTimerSec = 30.0f;
 
 	/** 检验屏每只娃娃超时（秒）。<= 0 表示无超时（教学班用）。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="0.0"))
 	float DollTimeoutSec = 0.0f;
 
 	/** 配额制度（与 CorrectGoal 二选一）：必须正确放行 N 次。0 = 不要求（仍用 CorrectGoal）。
 	 *  默认 2 — 防止"全扔" exploit。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="0"))
 	int32 PassQuota = 2;
 
 	/** 配额制度：必须正确丢弃 N 次。0 = 不要求。默认 1 — 防止"全放" exploit。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="0"))
 	int32 RejectQuota = 1;
 
 	/** 累积误判到此数 → 班次失败（玩家被回选卡屏重新组装）。0 = 永不失败。 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="0"))
 	int32 MaxMisjudgmentsBeforeFail = 3;
 };
 
