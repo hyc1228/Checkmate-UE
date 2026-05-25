@@ -785,15 +785,15 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 	if (Type == ECh2CellType::ClownPickup)
 	{
 		UAudioService::PlayCueStatic(this, FName("Ch2.Ritual"));
-		// 优先播 Ch2.Pickup sequence；fallback UMG fade
-		if (!TryPlaySequence(TEXT("Ch2.Pickup")) && HUDWidget)
+		// 优先播 Ch2.Pickup sequence；fallback：UMG fade + close-up glimpse
+		const bool bPlayedSeq = TryPlaySequence(TEXT("Ch2.Pickup"));
+		if (!bPlayedSeq)
 		{
-			HUDWidget->PlayPickupRitual();
+			if (HUDWidget) HUDWidget->PlayPickupRitual();
+			PlayRitualGlimpse();
 		}
-		if (ActivePawn)
-		{
-			ActivePawn->SetMode(ECh2Mode::Clown);
-		}
+		// SetMode 留给 timer 内 RestorePearl 阶段做（spec §3 缝扣后切 Clown 走法）
+		// 这里 deferred 是为了 glimpse 时眼睛先回 Pearl 再 SetMode 切 Clown 才显得 ritual
 		if (AActor** Found = CellActors.Find(Cell))
 		{
 			if (*Found) (*Found)->Destroy();
@@ -812,4 +812,64 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 			HUDWidget->ShowVictory();
 		}
 	}
+}
+
+void ACh2GameMode::PlayRitualGlimpse()
+{
+	UWorld* World = GetWorld();
+	if (!World || !ActivePawn) return;
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC) return;
+
+	// 1) Spawn close-up camera near pawn 头顶斜前方
+	const FVector PawnLoc = ActivePawn->GetActorLocation();
+	const FVector CamLoc = PawnLoc + FVector(-180.0f, 0.0f, 220.0f);
+	const FRotator CamRot = (PawnLoc - CamLoc).Rotation();
+
+	FActorSpawnParameters SP;
+	SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	RitualCloseUpCam = World->SpawnActor<ACameraActor>(CamLoc, CamRot, SP);
+	if (RitualCloseUpCam)
+	{
+		PC->SetViewTargetWithBlend(RitualCloseUpCam, 0.25f, EViewTargetBlendFunction::VTBlend_Cubic);
+	}
+
+	auto& TM = World->GetTimerManager();
+
+	// T=0.0：取扣（藏 EyeMarker）
+	if (ActivePawn->EyeMarker) ActivePawn->EyeMarker->SetVisibility(false);
+
+	// T=0.45：Glimpse — show 机械眼一闪
+	TM.SetTimer(RitualTimer_ShowMechanical, FTimerDelegate::CreateLambda([this]() {
+		if (!ActivePawn || !ActivePawn->EyeMarker) return;
+		ActivePawn->EyeMarker->SetVisibility(true);
+		if (ActivePawn->EyeMaterial_Mechanical)
+		{
+			ActivePawn->EyeMarker->SetMaterial(0, ActivePawn->EyeMaterial_Mechanical);
+		}
+	}), 0.45f, false);
+
+	// T=0.85：缝扣 — 切回 Pearl 暖白；同步 SetMode(Clown) 让走法切换
+	TM.SetTimer(RitualTimer_RestorePearl, FTimerDelegate::CreateLambda([this]() {
+		if (!ActivePawn) return;
+		if (ActivePawn->EyeMarker && ActivePawn->EyeMaterial_Pearl)
+		{
+			ActivePawn->EyeMarker->SetMaterial(0, ActivePawn->EyeMaterial_Pearl);
+		}
+		ActivePawn->SetMode(ECh2Mode::Clown);
+	}), 0.85f, false);
+
+	// T=1.4：blend 回俯视 camera
+	TM.SetTimer(RitualTimer_ReturnCam, FTimerDelegate::CreateLambda([this, PC]() {
+		if (CameraActorRef && PC)
+		{
+			PC->SetViewTargetWithBlend(CameraActorRef, 0.35f, EViewTargetBlendFunction::VTBlend_Cubic);
+		}
+		if (RitualCloseUpCam)
+		{
+			RitualCloseUpCam->Destroy();
+			RitualCloseUpCam = nullptr;
+		}
+	}), 1.4f, false);
 }

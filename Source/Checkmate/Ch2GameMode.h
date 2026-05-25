@@ -233,6 +233,18 @@ protected:
 	void ClearPathPreview();
 	void SpawnClickRipple(const FVector& WorldPos);
 
+	/** Ritual 拍点：close-up camera + 眼睛 glimpse（取扣→机械眼一闪→缝扣回 Pearl）。
+	 *  spec: switching-ritual.md §3 时序表。 */
+	void PlayRitualGlimpse();
+
+	UPROPERTY()
+	AActor* RitualCloseUpCam = nullptr;
+
+	FTimerHandle RitualTimer_HideEye;
+	FTimerHandle RitualTimer_ShowMechanical;
+	FTimerHandle RitualTimer_RestorePearl;
+	FTimerHandle RitualTimer_ReturnCam;
+
 public:
 	/** Pawn 在 TryMoveTo 成功时调，触发 click ripple。 */
 	UFUNCTION(BlueprintCallable, Category="Ch2")

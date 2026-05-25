@@ -187,6 +187,11 @@ private:
 	int32 WrongCount = 0;
 	bool bAwaitingNext = false;
 
+	// 误判统计 + 文案漂移 state
+	int32 MisjudgmentCount = 0;
+	bool bHasDriftedFalsePos = false;  // 一次性：第一次 FalsePos 时 toast 漂一次
+	bool bHasDriftedFalseNeg = false;  // 一次性：第一次 FalseNeg 时 toast 漂一次
+
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
 	float CurrentDollTimeRemaining = 0.0f;

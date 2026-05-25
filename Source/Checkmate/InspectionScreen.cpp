@@ -290,6 +290,10 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 	if (bPlayerCorrect) CorrectCount++;
 	else                WrongCount++;
 
+	// 分类 outcome（per judgment-card §3 Rule 7）
+	const EOutcomeClass Outcome = UJudgmentEvaluator::ClassifyOutcome(GroundTruth, bPlayerChosePass);
+	if (UJudgmentEvaluator::IsMisjudgment(Outcome)) MisjudgmentCount++;
+
 	if (ToastText)
 	{
 		FString Toast;
@@ -300,9 +304,23 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 		}
 		else
 		{
-			Toast = FString::Printf(TEXT("✗ 误判（应%s）—— %s"),
-				GroundTruth == EJudgmentVerdict::Pass ? TEXT("放行") : TEXT("丢弃"),
-				FailReason.IsEmpty() ? TEXT("符合所有判据") : *FailReason);
+			// 第一次 FalsePos / FalseNeg 漂一次文案（spec §4 阈下反馈）
+			if (Outcome == EOutcomeClass::FalsePositive && !bHasDriftedFalsePos)
+			{
+				bHasDriftedFalsePos = true;
+				Toast = TEXT("……可是她看起来没问题");
+			}
+			else if (Outcome == EOutcomeClass::FalseNegative && !bHasDriftedFalseNeg)
+			{
+				bHasDriftedFalseNeg = true;
+				Toast = TEXT("……你是不是太严了");
+			}
+			else
+			{
+				Toast = FString::Printf(TEXT("✗ 误判（应%s）—— %s"),
+					GroundTruth == EJudgmentVerdict::Pass ? TEXT("放行") : TEXT("丢弃"),
+					FailReason.IsEmpty() ? TEXT("符合所有判据") : *FailReason);
+			}
 		}
 		ToastText->SetText(FText::FromString(Toast));
 	}
