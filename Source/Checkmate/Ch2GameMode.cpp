@@ -169,12 +169,17 @@ void ACh2GameMode::BuildLevel()
 			TintColor = FVector(0.95f, 0.7f, 0.2f);  // 小丑金
 			break;
 		case ECh2CellType::Exit:
-			DecoMesh = ExitM;
-			DecoScale = FVector(CS / 100.0f, CS / 100.0f, 1.0f);
-			TintColor = FVector(0.2f, 0.9f, 0.5f);
-			DecoActor->SetActorLocation(FVector(C.X * CS, C.Y * CS, 5.0f));
+		{
+			// Exit 是高灯柱 + 强 emissive，远处也能一眼看见
+			DecoMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+			DecoScale = FVector(CS / 100.0f * 0.55f, CS / 100.0f * 0.55f, 6.0f);  // 高 600 unit 灯柱
+			TintColor = FVector(0.35f, 1.4f, 0.7f);  // 抢眼青绿
+			DecoActor->SetActorLocation(FVector(C.X * CS, C.Y * CS, CS * 3.0f));  // 抬到柱中心
+			if (EmissiveMaterial) DecoMC->SetMaterial(0, EmissiveMaterial);
+			DecoMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			ExitActor = DecoActor;
 			break;
+		}
 		case ECh2CellType::WeddingWreckage:
 			DecoMesh = WallM;
 			DecoScale = FVector(CS / 100.0f * 0.45f, CS / 100.0f * 0.45f, CS / 100.0f * 0.25f);
@@ -221,6 +226,20 @@ void ACh2GameMode::BuildLevel()
 			{
 				HUDWidget->AddToViewport(/*ZOrder=*/10);
 				if (ActivePawn) HUDWidget->SetMode(ActivePawn->CurrentMode);
+
+				// 出口方向 hint（屏幕方向相对玩家描述）
+				const FIntPoint ExitCell = LevelData->FindCellOfType(ECh2CellType::Exit);
+				const FIntPoint StartCellHint = LevelData->FindCellOfType(ECh2CellType::Start);
+				if (ExitCell.X >= 0 && StartCellHint.X >= 0)
+				{
+					const int32 DX = ExitCell.X - StartCellHint.X;
+					const int32 DY = ExitCell.Y - StartCellHint.Y;
+					FString Dir;
+					if (DY > 2)  Dir = TEXT("北");   else if (DY < -2) Dir = TEXT("南");
+					if (DX > 2)  Dir += TEXT("东");  else if (DX < -2) Dir += TEXT("西");
+					if (Dir.IsEmpty()) Dir = TEXT("中央");
+					HUDWidget->SetHintMessage(FString::Printf(TEXT("出口（青绿灯柱）在 %s — 找到爆炸玩偶用法绕过 destructible"), *Dir));
+				}
 			}
 		}
 	}
@@ -277,20 +296,26 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 		}
 	}
 
-	// 出口 pulse：基色 + sin 节拍亮起（spec「一抹彩色」）
+	// 出口 pulse：高灯柱 sin 强呼吸（青绿 ↔ 亮白绿）
 	if (ExitActor)
 	{
 		if (AStaticMeshActor* SMA = Cast<AStaticMeshActor>(ExitActor))
 		{
 			if (UStaticMeshComponent* MC = SMA->GetStaticMeshComponent())
 			{
-				const float Pulse = 0.5f + 0.5f * FMath::Sin(WorldElapsed * 2.0f);
+				const float Pulse = 0.5f + 0.5f * FMath::Sin(WorldElapsed * 2.5f);
 				const FVector C = FMath::Lerp(
-					FVector(0.2f, 0.9f, 0.5f),
-					FVector(0.7f, 1.0f, 0.85f),
+					FVector(0.35f, 1.4f, 0.7f),
+					FVector(0.6f, 2.0f, 1.0f),
 					Pulse);
 				MC->SetVectorParameterValueOnMaterials(TEXT("Color"), C);
+				// 同步抖一点亮度（Intensity 参数让 emissive 起伏）
+				MC->SetScalarParameterValueOnMaterials(TEXT("Intensity"), 6.0f + Pulse * 4.0f);
 			}
+			// 柱子轻轻上下浮动（呼吸感）
+			FVector L = SMA->GetActorLocation();
+			L.Z = LevelData->CellSize * 3.0f + FMath::Sin(WorldElapsed * 1.5f) * 8.0f;
+			SMA->SetActorLocation(L);
 		}
 	}
 

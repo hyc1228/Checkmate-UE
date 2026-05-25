@@ -52,13 +52,14 @@ struct FShiftConfig
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0.0"))
 	float DollTimeoutSec = 0.0f;
 
-	/** 配额制度（与 CorrectGoal 二选一）：必须正确放行 N 次。0 = 不要求（仍用 CorrectGoal）。 */
+	/** 配额制度（与 CorrectGoal 二选一）：必须正确放行 N 次。0 = 不要求（仍用 CorrectGoal）。
+	 *  默认 2 — 防止"全扔" exploit。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
-	int32 PassQuota = 0;
+	int32 PassQuota = 2;
 
-	/** 配额制度：必须正确丢弃 N 次。0 = 不要求。 */
+	/** 配额制度：必须正确丢弃 N 次。0 = 不要求。默认 1 — 防止"全放" exploit。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
-	int32 RejectQuota = 0;
+	int32 RejectQuota = 1;
 
 	/** 累积误判到此数 → 班次失败（玩家被回选卡屏重新组装）。0 = 永不失败。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
