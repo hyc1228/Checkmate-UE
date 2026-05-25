@@ -262,6 +262,30 @@ void UCardSelectionScreen::RefreshConfirmEnabled()
 				FText::AsNumber(SelectedCards.Num()), FText::AsNumber(K)));
 		}
 	}
+
+	// Pearl 纯净度：选中卡里 Pearl-compatible 的张数（spec：Pearl 主路径暗示）
+	if (PurityText)
+	{
+		int32 PearlCount = 0;
+		for (const UJudgmentCardWidget* W : SelectedCards)
+		{
+			// 从 widget 取关联 CardData。HandleCardClicked 里 widget 已绑 CardData。
+			// 这里通过 widget 的 GetCardData() 获取（widget 在 CardWidgetClass 里暴露）。
+		}
+		// 简单方案：从 PoolCards 中按 widget 找回 — 我们存了 SelectedCards 为 widget 而非 data。
+		// 用现有 GetAssembledCardData() 取选中的 CardData 列表
+		const TArray<UCardData*> Picked = GetAssembledCardData();
+		for (const UCardData* C : Picked)
+		{
+			if (C && C->bIsPearlCompatible) ++PearlCount;
+		}
+		const float Ratio = K > 0 ? static_cast<float>(PearlCount) / K : 0.0f;
+		FString Tail = TEXT("");
+		if (Ratio >= 0.66f && SelectedCards.Num() == K) Tail = TEXT("（这套标准会通向某个完美的人）");
+		else if (Ratio <= 0.33f && SelectedCards.Num() == K) Tail = TEXT("（这套标准很普通）");
+		const FString Msg = FString::Printf(TEXT("标准纯净度 %d / %d %s"), PearlCount, K, *Tail);
+		PurityText->SetText(FText::FromString(Msg));
+	}
 }
 
 void UCardSelectionScreen::OnBeginShiftClicked()

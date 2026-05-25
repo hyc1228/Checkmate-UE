@@ -136,8 +136,7 @@ void UJudgmentCardWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const 
 	bIsHovered = true;
 	TargetLift = ComputeTargetLift(bIsSelected, true, HoverLiftPixels, SelectedLiftPixels);
 	TargetScale = HoverScaleMultiplier;
-
-	UAudioService::PlayCueStatic(this, FName("UI.Hover"), 0.4f);
+	// 卡 hover 不出声 — 13 张密排扫过会乱，留 click 音即可（参考 Balatro/Slay the Spire）
 
 	// 把 hover 中的卡顶到最上层
 	if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot))

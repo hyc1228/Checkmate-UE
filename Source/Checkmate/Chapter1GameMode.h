@@ -51,6 +51,18 @@ struct FShiftConfig
 	/** 检验屏每只娃娃超时（秒）。<= 0 表示无超时（教学班用）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0.0"))
 	float DollTimeoutSec = 0.0f;
+
+	/** 配额制度（与 CorrectGoal 二选一）：必须正确放行 N 次。0 = 不要求（仍用 CorrectGoal）。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
+	int32 PassQuota = 0;
+
+	/** 配额制度：必须正确丢弃 N 次。0 = 不要求。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
+	int32 RejectQuota = 0;
+
+	/** 累积误判到此数 → 班次失败（玩家被回选卡屏重新组装）。0 = 永不失败。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Shift", meta=(ClampMin="0"))
+	int32 MaxMisjudgmentsBeforeFail = 3;
 };
 
 /**

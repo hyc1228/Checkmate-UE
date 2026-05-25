@@ -57,6 +57,11 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	CurrentDollIndex = 0;
 	CorrectCount = 0;
 	WrongCount = 0;
+	TrueAcceptCount = 0;
+	TrueRejectCount = 0;
+	MisjudgmentCount = 0;
+	bHasDriftedFalsePos = false;
+	bHasDriftedFalseNeg = false;
 	bAwaitingNext = false;
 
 	SpawnDeskCards();
@@ -300,6 +305,12 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 
 	// 分类 outcome（per judgment-card §3 Rule 7）
 	const EOutcomeClass Outcome = UJudgmentEvaluator::ClassifyOutcome(GroundTruth, bPlayerChosePass);
+	switch (Outcome)
+	{
+	case EOutcomeClass::TruePositive:  TrueAcceptCount++; break;
+	case EOutcomeClass::TrueNegative:  TrueRejectCount++; break;
+	default: break;
+	}
 	if (UJudgmentEvaluator::IsMisjudgment(Outcome))
 	{
 		MisjudgmentCount++;
@@ -452,13 +463,36 @@ void UInspectionScreen::AdvanceToNextDoll()
 		ToastText->SetText(FText::GetEmpty());
 	}
 
-	// 班次终止条件：正确次数达标（不是过完池）
-	if (CorrectCount >= CorrectGoal)
+	// 班次失败：误判超上限
+	if (MaxMisjudgmentsBeforeFail > 0 && MisjudgmentCount >= MaxMisjudgmentsBeforeFail)
 	{
 		FShiftResult Result;
-		Result.TotalDolls = CurrentDollIndex;  // 总处理数
+		Result.TotalDolls = CurrentDollIndex;
 		Result.CorrectCount = CorrectCount;
 		Result.WrongCount = WrongCount;
+		Result.TrueAcceptCount = TrueAcceptCount;
+		Result.TrueRejectCount = TrueRejectCount;
+		Result.bSuccess = false;
+		UE_LOG(LogTemp, Display, TEXT("[InspectionScreen] 班次失败：误判 %d >= 上限 %d"), MisjudgmentCount, MaxMisjudgmentsBeforeFail);
+		SetButtonsEnabled(false);
+		OnShiftCompleted.Broadcast(Result);
+		return;
+	}
+
+	// 班次完成：优先用配额制度（PassQuota + RejectQuota 都 > 0）；否则用 CorrectGoal
+	const bool bUseQuota = (PassQuota > 0 && RejectQuota > 0);
+	const bool bShiftDone = bUseQuota
+		? (TrueAcceptCount >= PassQuota && TrueRejectCount >= RejectQuota)
+		: (CorrectCount >= CorrectGoal);
+	if (bShiftDone)
+	{
+		FShiftResult Result;
+		Result.TotalDolls = CurrentDollIndex;
+		Result.CorrectCount = CorrectCount;
+		Result.WrongCount = WrongCount;
+		Result.TrueAcceptCount = TrueAcceptCount;
+		Result.TrueRejectCount = TrueRejectCount;
+		Result.bSuccess = true;
 
 		SetButtonsEnabled(false);
 		OnShiftCompleted.Broadcast(Result);

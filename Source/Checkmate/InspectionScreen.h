@@ -31,6 +31,16 @@ struct FShiftResult
 
 	UPROPERTY(BlueprintReadOnly, Category="Shift")
 	int32 WrongCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Shift")
+	int32 TrueAcceptCount = 0;  // 正确放行（合规且放行）
+
+	UPROPERTY(BlueprintReadOnly, Category="Shift")
+	int32 TrueRejectCount = 0;  // 正确丢弃（不合规且丢弃）
+
+	/** true = 班次成功；false = 班次失败（误判超上限）。 */
+	UPROPERTY(BlueprintReadOnly, Category="Shift")
+	bool bSuccess = true;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShiftCompleted, FShiftResult, Result);
@@ -92,9 +102,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0.0"))
 	float DollTimeoutSec = 0.0f;
 
-	/** 本班需要正确判定多少次才下班。GameMode 按班次配置改写。 */
+	/** 本班需要正确判定多少次才下班。GameMode 按班次配置改写。
+	 *  若 PassQuota/RejectQuota 都 >0，本字段被忽略（用配额制度判断完成）。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="1"))
 	int32 CorrectGoal = 3;
+
+	/** 必须正确放行 N 次才能下班（0 = 不要求）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0"))
+	int32 PassQuota = 0;
+
+	/** 必须正确丢弃 N 次才能下班（0 = 不要求）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0"))
+	int32 RejectQuota = 0;
+
+	/** 累积误判到此数 → 班次失败（玩家会被回选卡屏）。0 = 永不失败。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0"))
+	int32 MaxMisjudgmentsBeforeFail = 3;
 
 	// ── 反馈 juice 参数 ────────────────────────────────────────────────────
 
@@ -186,6 +209,8 @@ private:
 	int32 CurrentDollIndex = 0;
 	int32 CorrectCount = 0;
 	int32 WrongCount = 0;
+	int32 TrueAcceptCount = 0;
+	int32 TrueRejectCount = 0;
 	bool bAwaitingNext = false;
 
 	// 误判统计 + 文案漂移 state

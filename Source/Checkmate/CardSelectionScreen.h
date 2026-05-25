@@ -104,6 +104,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UTextBlock* CounterText = nullptr;
 
+	/** Pearl 纯净度指示：「标准纯净度 N/K」—— Pearl-compatible 卡占比，提示玩家是否在走翻转主路径。 */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UTextBlock* PurityText = nullptr;
+
 	/** Begin Shift 按钮上的文字（本地化驱动）。 */
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UTextBlock* BeginShiftLabel = nullptr;

@@ -144,6 +144,9 @@ void AChapter1GameMode::HandleCardsAssembled(const TArray<UCardData*>& SelectedC
 	ActiveInspectionScreen->SetShiftData(SelectedCards, Cfg.DollSequence);
 	ActiveInspectionScreen->DollTimeoutSec = Cfg.DollTimeoutSec;
 	ActiveInspectionScreen->CorrectGoal = Cfg.CorrectGoal;
+	ActiveInspectionScreen->PassQuota = Cfg.PassQuota;
+	ActiveInspectionScreen->RejectQuota = Cfg.RejectQuota;
+	ActiveInspectionScreen->MaxMisjudgmentsBeforeFail = Cfg.MaxMisjudgmentsBeforeFail;
 	ActiveInspectionScreen->OnShiftCompleted.AddDynamic(this, &AChapter1GameMode::HandleShiftCompleted);
 	ActiveInspectionScreen->AddToViewport();
 
@@ -181,14 +184,28 @@ void AChapter1GameMode::HandleCardsAssembled(const TArray<UCardData*>& SelectedC
 
 void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 {
-	UE_LOG(LogTemp, Display, TEXT("Chapter1: Shift %d 完成 — %d / %d 正确，%d 误判"),
-		CurrentShiftIdx + 1, Result.CorrectCount, Result.TotalDolls, Result.WrongCount);
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: Shift %d %s — TP=%d TN=%d 误判=%d 总=%d"),
+		CurrentShiftIdx + 1, Result.bSuccess ? TEXT("成功") : TEXT("失败"),
+		Result.TrueAcceptCount, Result.TrueRejectCount, Result.WrongCount, Result.TotalDolls);
 
 	if (ActiveInspectionScreen)
 	{
 		ActiveInspectionScreen->OnShiftCompleted.RemoveAll(this);
 		ActiveInspectionScreen->RemoveFromParent();
 		ActiveInspectionScreen = nullptr;
+	}
+
+	// 班次失败：回到当前班的选卡屏重试（不退回主菜单）
+	if (!Result.bSuccess)
+	{
+		UAudioService::PlayCueStatic(this, FName("Ch1.Wrong"));
+		// 短延迟后重启当班（让玩家看到 "班次失败" toast）
+		FTimerHandle RetryHandle;
+		GetWorld()->GetTimerManager().SetTimer(
+			RetryHandle,
+			FTimerDelegate::CreateLambda([this]() { BeginShift(CurrentShiftIdx); }),
+			1.2f, false);
+		return;
 	}
 
 	const int32 NextIdx = CurrentShiftIdx + 1;
