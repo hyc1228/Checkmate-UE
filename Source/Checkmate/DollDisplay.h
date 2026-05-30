@@ -127,6 +127,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Doll")
 	void ForceToss();
 
+	/** PV / Sequencer seam: hold a direct look back to the active camera, then restore. */
+	UFUNCTION(BlueprintCallable, Category="Doll|PV")
+	void TriggerLookAtCamera(float HoldSeconds = 0.5f);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -170,6 +174,8 @@ private:
 	float AnimElapsed = 0.0f;
 	FVector AnimStartLoc = FVector::ZeroVector;
 	FVector AnimEndLoc = FVector::ZeroVector;
+	FRotator PVLookAtOriginalRelativeRotation = FRotator::ZeroRotator;
+	FTimerHandle PVLookAtTimerHandle;
 
 	APlayerController* GetPC() const;
 	UPrimitiveComponent* TraceUnderCursor() const;
@@ -189,4 +195,5 @@ private:
 	void EnterConfirming();
 	void TickTossing(float Dt);
 	void TickConfirming(float Dt);
+	void RestorePVLookAtRotation();
 };

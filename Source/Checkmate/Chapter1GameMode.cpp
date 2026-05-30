@@ -334,6 +334,106 @@ void AChapter1GameMode::OpenCh2Map()
 	UGameplayStatics::OpenLevel(this, Ch2MapName);
 }
 
+void AChapter1GameMode::PV_Ch1Preset(FName PresetId)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_PRESET ignored in shipping build"));
+#else
+	const FString Id = PresetId.ToString().ToLower();
+	UE_LOG(LogTemp, Display, TEXT("PV_CH1_PRESET PresetId=%s Shift=%d"), *PresetId.ToString(), CurrentShiftIdx + 1);
+
+	if (Id == TEXT("a7") || Id == TEXT("dolllook") || Id == TEXT("lookat"))
+	{
+		PV_TriggerDollLookAtCamera(0.5f);
+		return;
+	}
+
+	if (Id == TEXT("a8") || Id == TEXT("buttonedge") || Id == TEXT("edge"))
+	{
+		PV_SetEdgeOpacity(0.5f, 0.5f);
+		return;
+	}
+
+	if (Id == TEXT("a13") || Id == TEXT("finalpearl") || Id == TEXT("fallback"))
+	{
+		PV_TriggerFinalPearl(true);
+		return;
+	}
+
+	if (Id == TEXT("twist") || Id == TEXT("b1"))
+	{
+		PV_TriggerTwistLeadIn();
+		return;
+	}
+
+	if (Id == TEXT("shift2transition") || Id == TEXT("a9"))
+	{
+		ShowShiftTransition(/*NextShiftIdx=*/1);
+		return;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_PRESET unknown PresetId=%s"), *PresetId.ToString());
+#endif
+}
+
+void AChapter1GameMode::PV_SetEdgeOpacity(float Opacity, float DurationSec)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_EDGE_OVERRIDE ignored in shipping build"));
+#else
+	if (!ActiveInspectionScreen)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PV_CH1_EDGE_OVERRIDE failed: no active inspection screen"));
+		return;
+	}
+
+	ActiveInspectionScreen->SetOpticalInversionEdgeOverride(Opacity, DurationSec, 0.20f);
+#endif
+}
+
+void AChapter1GameMode::PV_TriggerDollLookAtCamera(float HoldSeconds)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_A7_LOOKAT ignored in shipping build"));
+#else
+	if (!ActiveDollActor)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PV_CH1_A7_LOOKAT failed: no active doll actor"));
+		return;
+	}
+
+	ActiveDollActor->TriggerLookAtCamera(HoldSeconds);
+#endif
+}
+
+void AChapter1GameMode::PV_TriggerFinalPearl(bool bFallback)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_FINAL_PEARL ignored in shipping build"));
+#else
+	if (!ActiveInspectionScreen)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PV_CH1_FINAL_PEARL failed: no active inspection screen"));
+		return;
+	}
+
+	const bool bSet = ActiveInspectionScreen->PV_SetCurrentDollToTwistTrigger(bFallback);
+	UE_LOG(LogTemp, Display, TEXT("PV_CH1_FINAL_PEARL Fallback=%s Result=%s"),
+		bFallback ? TEXT("true") : TEXT("false"),
+		bSet ? TEXT("ok") : TEXT("failed"));
+#endif
+}
+
+void AChapter1GameMode::PV_TriggerTwistLeadIn()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_TWIST ignored in shipping build"));
+#else
+	UE_LOG(LogTemp, Display, TEXT("PV_CH1_TWIST_LEADIN"));
+	RequestTwist();
+#endif
+}
+
 void AChapter1GameMode::SetUIInputMode()
 {
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);

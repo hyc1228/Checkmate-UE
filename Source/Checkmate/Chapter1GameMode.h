@@ -133,6 +133,28 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch1|Twist")
 	void RequestTwist();
 
+	// ── PV capture helpers (development-only console seams) ────────────────
+
+	/** Jump the running Ch1 scene into a named PV capture preset. */
+	UFUNCTION(Exec)
+	void PV_Ch1Preset(FName PresetId);
+
+	/** Force the Ch1 button-edge post-process to a fixed value for recording A8. */
+	UFUNCTION(Exec)
+	void PV_SetEdgeOpacity(float Opacity = 0.5f, float DurationSec = 0.5f);
+
+	/** Make the current inspection doll look back at the camera for recording A7. */
+	UFUNCTION(Exec)
+	void PV_TriggerDollLookAtCamera(float HoldSeconds = 0.5f);
+
+	/** Force the final Pearl / fallback lead-in without changing judgment rules. */
+	UFUNCTION(Exec)
+	void PV_TriggerFinalPearl(bool bFallback = true);
+
+	/** Trigger the Ch1->Ch2 twist lead-in from the current recording state. */
+	UFUNCTION(Exec)
+	void PV_TriggerTwistLeadIn();
+
 protected:
 	virtual void BeginPlay() override;
 

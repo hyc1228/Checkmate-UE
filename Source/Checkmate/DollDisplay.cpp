@@ -8,9 +8,11 @@
 
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
 
 ADollDisplay::ADollDisplay()
 {
@@ -319,6 +321,45 @@ void ADollDisplay::ForceToss()
 	}
 }
 
+void ADollDisplay::TriggerLookAtCamera(float HoldSeconds)
+{
+	if (!DollMesh)
+	{
+		return;
+	}
+
+	APlayerController* PC = GetPC();
+	if (!PC || !PC->PlayerCameraManager)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("PV_CH1_A7_LOOKAT skipped: no PlayerCameraManager"));
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PVLookAtTimerHandle);
+	}
+
+	PVLookAtOriginalRelativeRotation = DollMesh->GetRelativeRotation();
+
+	const FVector CameraLocation = PC->PlayerCameraManager->GetCameraLocation();
+	const FVector EyeLocation = DollMesh->GetComponentLocation();
+	const FRotator LookAtRotation = (CameraLocation - EyeLocation).Rotation();
+	DollMesh->SetWorldRotation(LookAtRotation);
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			PVLookAtTimerHandle,
+			FTimerDelegate::CreateUObject(this, &ADollDisplay::RestorePVLookAtRotation),
+			FMath::Max(0.05f, HoldSeconds), false);
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("PV_CH1_A7_LOOKAT Hold=%.2f Doll=%s"),
+		HoldSeconds,
+		CurrentDoll ? *CurrentDoll->DollId.ToString() : TEXT("None"));
+}
+
 void ADollDisplay::EnterTossing()
 {
 	State = EState::Tossing;
@@ -402,5 +443,13 @@ void ADollDisplay::TickConfirming(float Dt)
 		DollMesh->SetVisibility(false);
 		BoxCoverMesh->SetVisibility(false);
 		if (OwningScreen) OwningScreen->OnDollAnimComplete();
+	}
+}
+
+void ADollDisplay::RestorePVLookAtRotation()
+{
+	if (DollMesh)
+	{
+		DollMesh->SetRelativeRotation(PVLookAtOriginalRelativeRotation);
 	}
 }

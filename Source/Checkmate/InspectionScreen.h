@@ -96,6 +96,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
 	void TriggerOpticalInversionSurge(float DurationSec = 1.0f);
 
+	/** PV / Sequencer seam: temporarily lock button-edge opacity, then return to runtime formula. */
+	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
+	void SetOpticalInversionEdgeOverride(float EdgeOpacity, float DurationSec = 0.5f, float EdgeRadius = 0.20f);
+
 	/** Twist EyeFall 阶段：爆白 + 短反相 + 色散。 */
 	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
 	void PlayTwistOpticalInversionBurnout(float DurationSec = 1.0f);
@@ -103,6 +107,14 @@ public:
 	/** MechanicalEyed 后把按扣覆盖层淡出。 */
 	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
 	void FadeOpticalInversionForMechanicalEye(float DurationSec = 1.5f);
+
+	/** PV / console seam: move the inspection flow to a named doll from the current sequence. */
+	UFUNCTION(BlueprintCallable, Category="Inspection|PV")
+	bool PV_SetCurrentDollById(FName DollId);
+
+	/** PV / console seam: move to the configured Pearl / fallback twist-trigger doll. */
+	UFUNCTION(BlueprintCallable, Category="Inspection|PV")
+	bool PV_SetCurrentDollToTwistTrigger(bool bPreferLast = true);
 
 	/** 班次结束时广播。 */
 	UPROPERTY(BlueprintAssignable, Category="Inspection")
@@ -305,6 +317,7 @@ private:
 
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
+	FTimerHandle OpticalOverrideTimerHandle;
 	float CurrentDollTimeRemaining = 0.0f;
 
 	// 反馈状态（NativeTick 驱动衰减）
@@ -334,6 +347,7 @@ private:
 	void UpdateOpticalInversion(float DeltaSeconds);
 	void PushOpticalInversionParameters();
 	float ComputeOpticalEdgeOpacityFromMisjudgments() const;
+	void RestoreOpticalInversionRuntimeTargets();
 
 	/** Spawn/refresh 桌面 K 张 3D 纸卡（diegetic 标准）。 */
 	void SpawnDeskCards();

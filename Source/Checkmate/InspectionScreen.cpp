@@ -183,6 +183,7 @@ void UInspectionScreen::NativeDestruct()
 	{
 		GetWorld()->GetTimerManager().ClearTimer(AdvanceTimerHandle);
 		GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
+		GetWorld()->GetTimerManager().ClearTimer(OpticalOverrideTimerHandle);
 	}
 
 	ClearDeskCards();
@@ -373,6 +374,30 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 
 	StartFeedback(bPlayerCorrect);
 
+	// Twist 触发优先于班次完成检查：final Pearl 常常同时满足 CorrectGoal。
+	if (Doll && Doll->bIsTwistTrigger)
+	{
+		const bool bMainPearlApprove = bPlayerChosePass && GroundTruth == EJudgmentVerdict::Pass;
+		const bool bFallbackAnyVerdict = CurrentDollIndex >= (DollSequence.Num() - 1);
+		if (bMainPearlApprove || bFallbackAnyVerdict)
+		{
+			UE_LOG(LogTemp, Display, TEXT("[InspectionScreen] TwistCandidate Doll=%s Outcome=%d Reason=%s"),
+				*Doll->DollId.ToString(),
+				static_cast<int32>(Outcome),
+				bMainPearlApprove ? TEXT("MainPearlApprove") : TEXT("ShiftFallbackAnyVerdict"));
+
+			if (AChapter1GameMode* GM = Cast<AChapter1GameMode>(UGameplayStatics::GetGameMode(this)))
+			{
+				GM->RequestTwist();
+			}
+
+			bAwaitingNext = true;
+			SetButtonsEnabled(false);
+			if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
+			return;
+		}
+	}
+
 	// 班次终止实时检查（不再等动画完成）
 	if (CheckShiftTermination())
 	{
@@ -380,17 +405,6 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 		SetButtonsEnabled(false);
 		if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
 		return;
-	}
-
-	// Twist 触发：玩家放行 + 客观符合 + 该娃娃配了 Pearl trigger
-	if (bPlayerChosePass
-		&& GroundTruth == EJudgmentVerdict::Pass
-		&& Doll && Doll->bIsTwistTrigger)
-	{
-		if (AChapter1GameMode* GM = Cast<AChapter1GameMode>(UGameplayStatics::GetGameMode(this)))
-		{
-			GM->RequestTwist();
-		}
 	}
 
 	bAwaitingNext = true;
@@ -542,6 +556,47 @@ void UInspectionScreen::TriggerOpticalInversionSurge(float DurationSec)
 	}
 }
 
+void UInspectionScreen::SetOpticalInversionEdgeOverride(float EdgeOpacity, float DurationSec, float EdgeRadius)
+{
+	EnsureOpticalInversionPostProcess();
+
+	const float ClampedOpacity = FMath::Clamp(EdgeOpacity, 0.0f, 1.0f);
+	OpticalSurgeRemainingSec = 0.0f;
+	OpticalBurnoutRemainingSec = 0.0f;
+	OpticalFadeRemainingSec = 0.0f;
+
+	OpticalTargetEdgeOpacityT = ClampedOpacity;
+	OpticalTargetEdgeRadiusT = FMath::Clamp(EdgeRadius, 0.0f, 1.0f);
+	OpticalTargetPulseT = 0.65f;
+	OpticalTargetInvertT = 0.08f;
+	OpticalTargetBurnoutT = 0.0f;
+	OpticalTargetMechanicalFadeT = 0.0f;
+
+	if (MisjudgmentPPVolume)
+	{
+		FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+		PP.bOverride_VignetteIntensity = true;
+		PP.VignetteIntensity = FMath::Lerp(0.35f, 1.20f, ClampedOpacity);
+		PP.bOverride_SceneFringeIntensity = true;
+		PP.SceneFringeIntensity = FMath::Lerp(0.0f, 1.8f, ClampedOpacity);
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(OpticalOverrideTimerHandle);
+		if (DurationSec > 0.0f)
+		{
+			World->GetTimerManager().SetTimer(
+				OpticalOverrideTimerHandle,
+				FTimerDelegate::CreateUObject(this, &UInspectionScreen::RestoreOpticalInversionRuntimeTargets),
+				DurationSec, false);
+		}
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("PV_CH1_EDGE_OVERRIDE Opacity=%.2f Duration=%.2f Radius=%.2f"),
+		ClampedOpacity, DurationSec, OpticalTargetEdgeRadiusT);
+}
+
 void UInspectionScreen::PlayTwistOpticalInversionBurnout(float DurationSec)
 {
 	EnsureOpticalInversionPostProcess();
@@ -578,6 +633,65 @@ void UInspectionScreen::FadeOpticalInversionForMechanicalEye(float DurationSec)
 	OpticalTargetInvertT = 0.0f;
 	OpticalTargetBurnoutT = 0.0f;
 	OpticalTargetMechanicalFadeT = 1.0f;
+}
+
+bool UInspectionScreen::PV_SetCurrentDollById(FName DollId)
+{
+	if (DollId.IsNone())
+	{
+		return false;
+	}
+
+	for (int32 i = 0; i < DollSequence.Num(); ++i)
+	{
+		const UDollData* Doll = DollSequence[i];
+		if (Doll && Doll->DollId == DollId)
+		{
+			CurrentDollIndex = i;
+			bAwaitingNext = false;
+			SetButtonsEnabled(true);
+			RenderCurrentDoll();
+			RenderProgress();
+			PushCurrentDollToActor();
+			UE_LOG(LogTemp, Display, TEXT("PV_CH1_DOLL_SET DollId=%s Index=%d"), *DollId.ToString(), i);
+			return true;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_DOLL_SET failed: DollId=%s not in current sequence"), *DollId.ToString());
+	return false;
+}
+
+bool UInspectionScreen::PV_SetCurrentDollToTwistTrigger(bool bPreferLast)
+{
+	if (DollSequence.Num() == 0)
+	{
+		return false;
+	}
+
+	if (bPreferLast)
+	{
+		for (int32 i = DollSequence.Num() - 1; i >= 0; --i)
+		{
+			if (DollSequence[i] && DollSequence[i]->bIsTwistTrigger)
+			{
+				return PV_SetCurrentDollById(DollSequence[i]->DollId);
+			}
+		}
+	}
+	else
+	{
+		for (int32 i = 0; i < DollSequence.Num(); ++i)
+		{
+			if (DollSequence[i] && DollSequence[i]->bIsTwistTrigger)
+			{
+				return PV_SetCurrentDollById(DollSequence[i]->DollId);
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH1_FINAL_PEARL failed: current sequence has no bIsTwistTrigger doll"));
+	return false;
 }
 
 void UInspectionScreen::EnsureOpticalInversionPostProcess()
@@ -687,6 +801,35 @@ float UInspectionScreen::ComputeOpticalEdgeOpacityFromMisjudgments() const
 		MisjudgmentCount * OpticalMisjudgmentStep + OpticalBaseOpacity,
 		OpticalBaseOpacity,
 		OpticalMaxOpacity);
+}
+
+void UInspectionScreen::RestoreOpticalInversionRuntimeTargets()
+{
+	OpticalTargetEdgeOpacityT = ComputeOpticalEdgeOpacityFromMisjudgments();
+	OpticalTargetEdgeRadiusT = MisjudgmentCount > 0 ? 0.12f : 0.0f;
+	OpticalTargetPulseT = MisjudgmentCount > 0 ? 0.15f : 0.0f;
+	OpticalTargetInvertT = 0.0f;
+	OpticalTargetBurnoutT = 0.0f;
+	OpticalTargetMechanicalFadeT = 0.0f;
+
+	if (MisjudgmentPPVolume)
+	{
+		const float Pressure = FMath::Clamp(MisjudgmentCount / 5.0f, 0.0f, 1.0f);
+		FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+		PP.bOverride_VignetteIntensity = true;
+		PP.VignetteIntensity = FMath::Lerp(0.35f, 1.10f, OpticalTargetEdgeOpacityT);
+		PP.bOverride_SceneFringeIntensity = true;
+		PP.SceneFringeIntensity = FMath::Lerp(0.0f, 2.5f, Pressure);
+		PP.bOverride_ColorSaturation = true;
+		PP.ColorSaturation = FVector4(
+			FMath::Lerp(1.0f, 0.78f, Pressure),
+			FMath::Lerp(1.0f, 0.78f, Pressure),
+			FMath::Lerp(1.0f, 0.78f, Pressure),
+			1.0f);
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("PV_CH1_EDGE_RESTORE RuntimeOpacity=%.2f Misjudgments=%d"),
+		OpticalTargetEdgeOpacityT, MisjudgmentCount);
 }
 
 void UInspectionScreen::StartFeedback(bool bCorrect)
