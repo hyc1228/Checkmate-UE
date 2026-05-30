@@ -108,6 +108,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
 	void FadeOpticalInversionForMechanicalEye(float DurationSec = 1.5f);
 
+	/** WBP hook for icon/stamp feedback so verdicts need less explanatory text. */
+	UFUNCTION(BlueprintImplementableEvent, Category="Inspection|Feedback")
+	void OnVerdictVisualFeedback(bool bCorrect, bool bPlayerChosePass, bool bGroundTruthPass);
+
 	/** PV / console seam: move the inspection flow to a named doll from the current sequence. */
 	UFUNCTION(BlueprintCallable, Category="Inspection|PV")
 	bool PV_SetCurrentDollById(FName DollId);
@@ -159,9 +163,21 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float FlashPeakAlpha = 0.45f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float CorrectFlashPeakAlpha = 0.36f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float WrongFlashPeakAlpha = 0.72f;
+
 	/** 闪屏总时长（秒）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.05"))
 	float FlashDurationSec = 0.35f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.05"))
+	float CorrectFlashDurationSec = 0.38f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.05"))
+	float WrongFlashDurationSec = 0.58f;
 
 	/** 错误震屏振幅（像素），正确震屏用 1/3。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.0"))
@@ -170,6 +186,37 @@ public:
 	/** 震屏时长（秒）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.05"))
 	float ShakeDurationSec = 0.30f;
+
+	/** Full-frame verdict pulse, layered through the Ch1 post-process volume. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|PostProcess", meta=(ClampMin="0.05"))
+	float VerdictPostProcessDurationSec = 0.55f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|PostProcess", meta=(ClampMin="0.0", ClampMax="2.0"))
+	float CorrectPostProcessPeak = 0.55f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|PostProcess", meta=(ClampMin="0.0", ClampMax="2.0"))
+	float WrongPostProcessPeak = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio")
+	FName CorrectVerdictCue = TEXT("Ch1.Correct");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio")
+	FName WrongVerdictCue = TEXT("Ch1.Wrong");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio")
+	FName PassActionCue = TEXT("Ch1.Stamp");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio")
+	FName RejectActionCue = TEXT("Ch1.Toss");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio", meta=(ClampMin="0.0", ClampMax="4.0"))
+	float CorrectVerdictVolume = 0.65f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio", meta=(ClampMin="0.0", ClampMax="4.0"))
+	float WrongVerdictVolume = 1.15f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio", meta=(ClampMin="0.0", ClampMax="4.0"))
+	float ButtonFallbackActionVolume = 0.85f;
 
 	// ── Ch1 Optical Inversion Layer / PP_SubliminalEdge ─────────────────────
 
@@ -300,6 +347,13 @@ private:
 	UPROPERTY()
 	TArray<AActor*> DeskCardActors;
 
+	TArray<FVector> DeskCardStartLocations;
+	TArray<FVector> DeskCardTargetLocations;
+	TArray<FRotator> DeskCardStartRotations;
+	TArray<FRotator> DeskCardTargetRotations;
+	TArray<float> DeskCardDropElapsed;
+	TArray<float> DeskCardDropDelay;
+
 	/** 桌面纸卡 spawn 起点（doll 前方下方）。Y 方向是相机左右展开方向。 */
 	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
 	FVector DeskCardOrigin = FVector(-30.0f, -240.0f, 40.0f);
@@ -315,6 +369,21 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
 	UMaterialInterface* DeskCardMaterial = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards", meta=(ClampMin="0.0"))
+	float DeskCardDropHeight = 140.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards", meta=(ClampMin="0.05"))
+	float DeskCardDropDurationSec = 0.45f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards", meta=(ClampMin="0.0"))
+	float DeskCardDropStaggerSec = 0.08f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
+	bool bHideJudgmentTextWhenDeskCardsSpawn = true;
+
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
+	bool bHideDollAttributeTextWhenDollActorSpawn = true;
+
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
 	FTimerHandle OpticalOverrideTimerHandle;
@@ -324,9 +393,14 @@ private:
 	float FlashElapsed = 0.0f;
 	float FlashTotal = 0.0f;
 	FLinearColor FlashTargetColor = FLinearColor::White;
+	float ActiveFlashPeakAlpha = 0.45f;
 	float ShakeElapsed = 0.0f;
 	float ShakeTotal = 0.0f;
 	float ShakeAmplitude = 0.0f;
+	float VerdictPostProcessElapsed = 0.0f;
+	float VerdictPostProcessTotal = 0.0f;
+	float VerdictPostProcessPeak = 0.0f;
+	bool bVerdictPostProcessCorrect = true;
 
 	void RenderJudgmentCardsList();
 	void RenderCurrentDoll();
@@ -335,7 +409,11 @@ private:
 	void AdvanceToNextDoll();
 	void SetButtonsEnabled(bool bEnabled);
 
-	void StartFeedback(bool bCorrect);
+	void StartFeedback(bool bCorrect, bool bPlayerChosePass, bool bGroundTruthPass);
+	void PlayVerdictAudio(bool bCorrect, bool bPlayerChosePass);
+	void StartVerdictPostProcessFeedback(bool bCorrect);
+	void UpdateVerdictPostProcessFeedback(float DeltaSeconds);
+	void RestorePostProcessAfterVerdictFeedback();
 	void HandleDollTimeout();
 	void PushCurrentDollToActor();
 
@@ -352,6 +430,7 @@ private:
 	/** Spawn/refresh 桌面 K 张 3D 纸卡（diegetic 标准）。 */
 	void SpawnDeskCards();
 	void ClearDeskCards();
+	void UpdateDeskCardDrops(float DeltaSeconds);
 
 	/** 立即检查本班是否该终止（成功/失败）。返回 true 表示已 schedule 终止 broadcast。 */
 	bool CheckShiftTermination();

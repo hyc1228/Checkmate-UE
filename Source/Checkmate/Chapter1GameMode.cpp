@@ -14,6 +14,7 @@
 #include "Camera/CameraActor.h"
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
+#include "Engine/PostProcessVolume.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -22,7 +23,7 @@
 
 AChapter1GameMode::AChapter1GameMode()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	// 默认 ADefaultPawn 会绑 mouse-look 让相机跟鼠标转——本游戏是固定视角下的 3D 检验台，
 	// 用 bare APawn 替代（无 movement / 无 look 输入）。视角 = 该 pawn 在 PlayerStart 的 transform。
@@ -72,6 +73,7 @@ void AChapter1GameMode::BeginPlay()
 		}
 		if (Cameras.Num() > 0)
 		{
+			ApplyRuntimeCameraFraming(Cameras[0]);
 			PC->SetViewTargetWithBlend(Cameras[0], 0.0f);
 		}
 		else
@@ -81,7 +83,289 @@ void AChapter1GameMode::BeginPlay()
 	}
 
 	CurrentShiftIdx = 0;
-	BeginShift(CurrentShiftIdx);
+	ShowShiftIntro(CurrentShiftIdx);
+}
+
+void AChapter1GameMode::ApplyRuntimeCameraFraming(AActor* CameraActor) const
+{
+	if (!bOverrideInspectionCameraTransform || !CameraActor)
+	{
+		return;
+	}
+
+	const FRotator LookAtRotation = (RuntimeCameraLookAt - RuntimeCameraLocation).Rotation();
+	CameraActor->SetActorLocationAndRotation(RuntimeCameraLocation, LookAtRotation);
+}
+
+void AChapter1GameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	UpdateProgressPanelPostProcessCue(DeltaSeconds);
+}
+
+void AChapter1GameMode::TriggerPresentationCue(FName CueId, int32 ShiftNumber, ECh1ProgressPanelMoment Moment, bool bMajorBeat)
+{
+	const FName ResolvedCue = CueId.IsNone()
+		? (bMajorBeat ? FName("Ch1.PanelMajor") : FName("Ch1.PanelOpen"))
+		: CueId;
+
+	OnPresentationCue.Broadcast(ResolvedCue, ShiftNumber, Moment);
+	K2_OnPresentationCue(ResolvedCue, ShiftNumber, Moment, bMajorBeat);
+	UAudioService::PlayCueStatic(this, ResolvedCue, bMajorBeat ? 0.85f : 0.62f);
+	StartProgressPanelPostProcessCue(bMajorBeat);
+
+	UE_LOG(LogTemp, Display, TEXT("CH1_PRESENTATION_CUE Cue=%s Shift=%d Moment=%d Major=%s"),
+		*ResolvedCue.ToString(), ShiftNumber, static_cast<int32>(Moment), bMajorBeat ? TEXT("true") : TEXT("false"));
+}
+
+FCh1ProgressPanelPayload AChapter1GameMode::BuildProgressPanelPayload(int32 ShiftIdx, ECh1ProgressPanelMoment Moment) const
+{
+	FCh1ProgressPanelPayload Payload;
+	Payload.ShiftIndex = ShiftIdx;
+	Payload.ShiftNumber = ShiftIdx + 1;
+	Payload.TotalShifts = FMath::Max(Shifts.Num(), 1);
+	Payload.Moment = Moment;
+
+	const FShiftConfig* Cfg = Shifts.IsValidIndex(ShiftIdx) ? &Shifts[ShiftIdx] : nullptr;
+	if (Cfg && !Cfg->PanelEyebrow.IsEmpty())
+	{
+		Payload.Eyebrow = Cfg->PanelEyebrow;
+	}
+	else
+	{
+		Payload.Eyebrow = FText::FromString(FString::Printf(TEXT("DAY %02d / FACTORY FLOOR"), Payload.ShiftNumber));
+	}
+
+	if (Cfg && !Cfg->PanelTitle.IsEmpty())
+	{
+		Payload.Title = Cfg->PanelTitle;
+	}
+	else
+	{
+		switch (Moment)
+		{
+		case ECh1ProgressPanelMoment::ShiftRetry:
+			Payload.Title = FText::FromString(FString::Printf(TEXT("SHIFT %02d REOPENED"), Payload.ShiftNumber));
+			break;
+		case ECh1ProgressPanelMoment::ChapterComplete:
+			Payload.Title = FText::FromString(TEXT("INSPECTION RECORD SEALED"));
+			break;
+		case ECh1ProgressPanelMoment::TwistLeadIn:
+			Payload.Title = FText::FromString(TEXT("STANDARD ACCEPTED"));
+			break;
+		default:
+			Payload.Title = FText::FromString(FString::Printf(TEXT("SHIFT %02d"), Payload.ShiftNumber));
+			break;
+		}
+	}
+
+	if (Cfg && !Cfg->PanelBody.IsEmpty() && Moment == ECh1ProgressPanelMoment::ShiftIntro)
+	{
+		Payload.Body = Cfg->PanelBody;
+	}
+	else if (Moment == ECh1ProgressPanelMoment::ShiftRetry)
+	{
+		Payload.Body = FText::FromString(TEXT("The record was rejected. Reassemble the standard and run the line again."));
+	}
+	else if (Moment == ECh1ProgressPanelMoment::TwistLeadIn)
+	{
+		Payload.Body = FText::FromString(TEXT("Hold the verdict. The factory is looking back."));
+	}
+	else
+	{
+		static const TCHAR* ShiftBodies[] =
+		{
+			TEXT("Assemble the standard. Keep the line clean."),
+			TEXT("The standard is now your choice."),
+			TEXT("Work faster. Let the edge of the rule show."),
+			TEXT("The standard may move while you are holding it.")
+		};
+		const int32 BodyIdx = FMath::Clamp(ShiftIdx, 0, static_cast<int32>(UE_ARRAY_COUNT(ShiftBodies)) - 1);
+		Payload.Body = FText::FromString(ShiftBodies[BodyIdx]);
+	}
+
+	if (Cfg && !Cfg->PanelCueId.IsNone())
+	{
+		Payload.CueId = Cfg->PanelCueId;
+	}
+	else if (Moment == ECh1ProgressPanelMoment::ShiftRetry)
+	{
+		Payload.CueId = FName("Ch1.PanelRetry");
+	}
+	else if (Moment == ECh1ProgressPanelMoment::TwistLeadIn)
+	{
+		Payload.CueId = FName("Ch1.PanelTwistLeadIn");
+	}
+	else
+	{
+		Payload.CueId = Payload.ShiftNumber >= 3 ? FName("Ch1.PanelMajor") : FName("Ch1.PanelOpen");
+	}
+
+	Payload.bMajorBeat = (Cfg && Cfg->bMajorPresentationBeat) || Payload.ShiftNumber >= 3
+		|| Moment == ECh1ProgressPanelMoment::ChapterComplete
+		|| Moment == ECh1ProgressPanelMoment::TwistLeadIn;
+
+	return Payload;
+}
+
+void AChapter1GameMode::ShowShiftIntro(int32 ShiftIdx)
+{
+	const float HoldSeconds = ShiftIdx == 0 ? InitialPanelHoldSeconds : TransitionHoldSeconds;
+	ShowProgressPanel(
+		ShiftIdx,
+		ECh1ProgressPanelMoment::ShiftIntro,
+		HoldSeconds,
+		FTimerDelegate::CreateLambda([this, ShiftIdx]()
+		{
+			CurrentShiftIdx = ShiftIdx;
+			BeginShift(CurrentShiftIdx);
+		}));
+}
+
+void AChapter1GameMode::ShowRetryTransition()
+{
+	ShowProgressPanel(
+		CurrentShiftIdx,
+		ECh1ProgressPanelMoment::ShiftRetry,
+		FMath::Max(1.2f, TransitionHoldSeconds * 0.72f),
+		FTimerDelegate::CreateLambda([this]()
+		{
+			BeginShift(CurrentShiftIdx);
+		}));
+}
+
+void AChapter1GameMode::ShowProgressPanel(
+	int32 ShiftIdx,
+	ECh1ProgressPanelMoment Moment,
+	float HoldSeconds,
+	FTimerDelegate CompletionDelegate)
+{
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		CompletionDelegate.ExecuteIfBound();
+		return;
+	}
+
+	GetWorldTimerManager().ClearTimer(ProgressPanelTimer);
+
+	if (ActiveTransitionScreen)
+	{
+		ActiveTransitionScreen->RemoveFromParent();
+		ActiveTransitionScreen = nullptr;
+	}
+
+	const FCh1ProgressPanelPayload Payload = BuildProgressPanelPayload(ShiftIdx, Moment);
+
+	if (bUseNativeProgressPanelFallback || ProgressPanelWidgetClass || !ShiftTransitionWidgetClass)
+	{
+		TSubclassOf<UCh1ProgressPanelWidget> PanelClass = ProgressPanelWidgetClass;
+		if (!PanelClass)
+		{
+			PanelClass = UCh1ProgressPanelWidget::StaticClass();
+		}
+
+		if (UCh1ProgressPanelWidget* ProgressPanel = CreateWidget<UCh1ProgressPanelWidget>(PC, PanelClass))
+		{
+			ProgressPanel->ConfigurePanel(Payload, HoldSeconds);
+			ProgressPanel->AddToViewport(/*ZOrder=*/120);
+			ActiveTransitionScreen = ProgressPanel;
+		}
+	}
+	else
+	{
+		ActiveTransitionScreen = CreateWidget<UUserWidget>(PC, ShiftTransitionWidgetClass);
+		if (ActiveTransitionScreen)
+		{
+			if (UTextBlock* Title = Cast<UTextBlock>(ActiveTransitionScreen->GetWidgetFromName(TEXT("TitleText"))))
+			{
+				Title->SetText(Payload.Title);
+			}
+			ActiveTransitionScreen->AddToViewport(/*ZOrder=*/120);
+		}
+	}
+
+	SetUIInputMode();
+	TriggerPresentationCue(Payload.CueId, Payload.ShiftNumber, Payload.Moment, Payload.bMajorBeat);
+
+	GetWorldTimerManager().SetTimer(
+		ProgressPanelTimer,
+		FTimerDelegate::CreateLambda([this, CompletionDelegate]() mutable
+		{
+			if (UCh1ProgressPanelWidget* ProgressPanel = Cast<UCh1ProgressPanelWidget>(ActiveTransitionScreen))
+			{
+				ProgressPanel->StartDismiss();
+			}
+			if (ActiveTransitionScreen)
+			{
+				ActiveTransitionScreen->RemoveFromParent();
+				ActiveTransitionScreen = nullptr;
+			}
+			CompletionDelegate.ExecuteIfBound();
+		}),
+		FMath::Max(0.5f, HoldSeconds),
+		false);
+}
+
+void AChapter1GameMode::StartProgressPanelPostProcessCue(bool bMajorBeat)
+{
+	if (ProgressPanelPostProcessDuration <= 0.0f || ProgressPanelPostProcessPeak <= 0.0f)
+	{
+		return;
+	}
+
+	if (!ProgressPanelPostProcessVolume)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ProgressPanelPostProcessVolume = GetWorld()->SpawnActor<APostProcessVolume>(
+			APostProcessVolume::StaticClass(),
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			Params);
+		if (ProgressPanelPostProcessVolume)
+		{
+			ProgressPanelPostProcessVolume->bUnbound = true;
+			ProgressPanelPostProcessVolume->Priority = 30.0f;
+		}
+	}
+
+	ProgressPanelPostProcessElapsed = 0.0f;
+	bProgressPanelPostProcessActive = ProgressPanelPostProcessVolume != nullptr;
+	bProgressPanelPostProcessMajor = bMajorBeat;
+}
+
+void AChapter1GameMode::UpdateProgressPanelPostProcessCue(float DeltaSeconds)
+{
+	if (!bProgressPanelPostProcessActive || !ProgressPanelPostProcessVolume)
+	{
+		return;
+	}
+
+	ProgressPanelPostProcessElapsed += DeltaSeconds;
+	const float T = FMath::Clamp(ProgressPanelPostProcessElapsed / FMath::Max(0.05f, ProgressPanelPostProcessDuration), 0.0f, 1.0f);
+	const float Pulse = FMath::Sin(T * PI) * ProgressPanelPostProcessPeak * (bProgressPanelPostProcessMajor ? 1.0f : 0.58f);
+
+	FPostProcessSettings& PP = ProgressPanelPostProcessVolume->Settings;
+	ProgressPanelPostProcessVolume->BlendWeight = FMath::Clamp(Pulse, 0.0f, 1.0f);
+
+	PP.bOverride_VignetteIntensity = true;
+	PP.VignetteIntensity = 0.28f + Pulse * (bProgressPanelPostProcessMajor ? 0.45f : 0.25f);
+
+	PP.bOverride_SceneFringeIntensity = true;
+	PP.SceneFringeIntensity = Pulse * (bProgressPanelPostProcessMajor ? 2.4f : 1.1f);
+
+	PP.bOverride_BloomIntensity = true;
+	PP.BloomIntensity = 0.22f + Pulse * (bProgressPanelPostProcessMajor ? 1.2f : 0.55f);
+
+	PP.bOverride_AutoExposureBias = true;
+	PP.AutoExposureBias = Pulse * (bProgressPanelPostProcessMajor ? 0.22f : 0.12f);
+
+	if (ProgressPanelPostProcessElapsed >= ProgressPanelPostProcessDuration)
+	{
+		ProgressPanelPostProcessVolume->BlendWeight = 0.0f;
+		bProgressPanelPostProcessActive = false;
+	}
 }
 
 void AChapter1GameMode::BeginShift(int32 ShiftIdx)
@@ -204,7 +488,7 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 		FTimerHandle RetryHandle;
 		GetWorld()->GetTimerManager().SetTimer(
 			RetryHandle,
-			FTimerDelegate::CreateLambda([this]() { BeginShift(CurrentShiftIdx); }),
+			FTimerDelegate::CreateLambda([this]() { ShowRetryTransition(); }),
 			1.2f, false);
 		return;
 	}
@@ -223,6 +507,12 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 
 void AChapter1GameMode::ShowShiftTransition(int32 NextShiftIdx)
 {
+	if (bUseNativeProgressPanelFallback || ProgressPanelWidgetClass || !ShiftTransitionWidgetClass)
+	{
+		ShowShiftIntro(NextShiftIdx);
+		return;
+	}
+
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PC) return;
 
@@ -282,6 +572,7 @@ void AChapter1GameMode::RequestTwist()
 	UE_LOG(LogTemp, Display, TEXT("Chapter1: ★ Twist triggered — Ch1→Ch2 翻转拍点"));
 
 	// 音频：翻转专属 cue；没绑 Native/FMOD 时 AudioService 会静默 fallback。
+	TriggerPresentationCue(FName("Ch1.PanelTwistLeadIn"), CurrentShiftIdx + 1, ECh1ProgressPanelMoment::TwistLeadIn, true);
 	UAudioService::PlayCueStatic(this, FName("Twist.DroneAscent"), 0.8f);
 	UAudioService::PlayCueStatic(this, FName("Twist.PearlEye"));
 

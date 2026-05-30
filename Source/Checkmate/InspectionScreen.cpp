@@ -50,6 +50,12 @@ namespace
 		for (const FName& T : Traits) Parts.Add(T.ToString());
 		return FString::Join(Parts, TEXT(", "));
 	}
+
+	float EaseOutCubic(float T)
+	{
+		const float Clamped = FMath::Clamp(T, 0.0f, 1.0f);
+		return 1.0f - FMath::Pow(1.0f - Clamped, 3.0f);
+	}
 }
 
 void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, const TArray<UDollData*>& InDollSequence)
@@ -88,6 +94,10 @@ void UInspectionScreen::SetDollActor(ADollDisplay* InActor)
 	{
 		DollActor->SetOwningScreen(this);
 		PushCurrentDollToActor();
+		if (DollAttributeText && bHideDollAttributeTextWhenDollActorSpawn)
+		{
+			DollAttributeText->SetVisibility(ESlateVisibility::Collapsed);
+		}
 	}
 }
 
@@ -259,7 +269,7 @@ void UInspectionScreen::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		else
 		{
 			const float Phase = FlashElapsed / FlashTotal;
-			const float Alpha = FMath::Sin(Phase * PI) * FlashPeakAlpha;
+			const float Alpha = FMath::Sin(Phase * PI) * ActiveFlashPeakAlpha;
 			FLinearColor C = FlashTargetColor;
 			C.A = Alpha;
 			FlashOverlay->SetBrushColor(C);
@@ -292,6 +302,8 @@ void UInspectionScreen::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		DollTimerText->SetText(FText::AsNumber(FMath::CeilToInt(CurrentDollTimeRemaining)));
 	}
 
+	UpdateDeskCardDrops(InDeltaTime);
+	UpdateVerdictPostProcessFeedback(InDeltaTime);
 	UpdateOpticalInversion(InDeltaTime);
 }
 
@@ -372,7 +384,8 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 		ToastText->SetText(FText::FromString(Toast));
 	}
 
-	StartFeedback(bPlayerCorrect);
+	StartFeedback(bPlayerCorrect, bPlayerChosePass, GroundTruth == EJudgmentVerdict::Pass);
+	OnVerdictVisualFeedback(bPlayerCorrect, bPlayerChosePass, GroundTruth == EJudgmentVerdict::Pass);
 
 	// Twist 触发优先于班次完成检查：final Pearl 常常同时满足 CorrectGoal。
 	if (Doll && Doll->bIsTwistTrigger)
@@ -842,19 +855,139 @@ void UInspectionScreen::RestoreOpticalInversionRuntimeTargets()
 		OpticalTargetEdgeOpacityT, MisjudgmentCount);
 }
 
-void UInspectionScreen::StartFeedback(bool bCorrect)
+void UInspectionScreen::StartFeedback(bool bCorrect, bool bPlayerChosePass, bool /*bGroundTruthPass*/)
 {
-	UAudioService::PlayCueStatic(this, bCorrect ? FName("Ch1.Correct") : FName("Ch1.Wrong"));
+	PlayVerdictAudio(bCorrect, bPlayerChosePass);
 
 	// 闪屏
 	FlashElapsed = 0.0f;
-	FlashTotal = FlashDurationSec;
+	FlashTotal = bCorrect ? CorrectFlashDurationSec : WrongFlashDurationSec;
 	FlashTargetColor = bCorrect ? CorrectFlashColor : WrongFlashColor;
+	ActiveFlashPeakAlpha = bCorrect ? CorrectFlashPeakAlpha : WrongFlashPeakAlpha;
 
 	// 震屏（正确弱 / 错误强）
 	ShakeElapsed = 0.0f;
-	ShakeTotal = ShakeDurationSec;
-	ShakeAmplitude = bCorrect ? (WrongShakeAmplitude * 0.33f) : WrongShakeAmplitude;
+	ShakeTotal = bCorrect ? (ShakeDurationSec * 0.75f) : (ShakeDurationSec * 1.25f);
+	ShakeAmplitude = bCorrect ? (WrongShakeAmplitude * 0.28f) : (WrongShakeAmplitude * 1.35f);
+
+	StartVerdictPostProcessFeedback(bCorrect);
+}
+
+void UInspectionScreen::PlayVerdictAudio(bool bCorrect, bool bPlayerChosePass)
+{
+	// DollDisplay already plays the physical stamp/toss cue during 3D interaction.
+	// The UI-button fallback still needs a diegetic action layer.
+	if (!DollActor)
+	{
+		const FName ActionCue = bPlayerChosePass ? PassActionCue : RejectActionCue;
+		UAudioService::PlayCueStatic(this, ActionCue, ButtonFallbackActionVolume);
+	}
+
+	const FName VerdictCue = bCorrect ? CorrectVerdictCue : WrongVerdictCue;
+	const float Volume = bCorrect ? CorrectVerdictVolume : WrongVerdictVolume;
+	UAudioService::PlayCueStatic(this, VerdictCue, Volume);
+}
+
+void UInspectionScreen::StartVerdictPostProcessFeedback(bool bCorrect)
+{
+	EnsureOpticalInversionPostProcess();
+
+	bVerdictPostProcessCorrect = bCorrect;
+	VerdictPostProcessElapsed = 0.0f;
+	VerdictPostProcessTotal = VerdictPostProcessDurationSec;
+	VerdictPostProcessPeak = bCorrect ? CorrectPostProcessPeak : WrongPostProcessPeak;
+}
+
+void UInspectionScreen::UpdateVerdictPostProcessFeedback(float DeltaSeconds)
+{
+	if (VerdictPostProcessTotal <= 0.0f)
+	{
+		return;
+	}
+
+	if (!MisjudgmentPPVolume)
+	{
+		EnsureOpticalInversionPostProcess();
+	}
+	if (!MisjudgmentPPVolume)
+	{
+		return;
+	}
+
+	VerdictPostProcessElapsed += DeltaSeconds;
+	const float T = FMath::Clamp(VerdictPostProcessElapsed / FMath::Max(0.05f, VerdictPostProcessTotal), 0.0f, 1.0f);
+	const float Pulse = FMath::Sin(T * PI) * VerdictPostProcessPeak;
+	const float MisjudgmentPressure = FMath::Clamp(MisjudgmentCount / 5.0f, 0.0f, 1.0f);
+
+	FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+	PP.bOverride_VignetteIntensity = true;
+	PP.VignetteIntensity = FMath::Max(
+		MisjudgmentCount > 0 ? FMath::Lerp(0.35f, 1.10f, OpticalTargetEdgeOpacityT) : 0.25f,
+		(bVerdictPostProcessCorrect ? 0.38f : 0.62f) + Pulse * (bVerdictPostProcessCorrect ? 0.35f : 0.72f));
+
+	PP.bOverride_SceneFringeIntensity = true;
+	PP.SceneFringeIntensity = FMath::Lerp(0.0f, 2.5f, MisjudgmentPressure)
+		+ Pulse * (bVerdictPostProcessCorrect ? 0.65f : 3.3f);
+
+	PP.bOverride_ColorSaturation = true;
+	if (bVerdictPostProcessCorrect)
+	{
+		PP.ColorSaturation = FVector4(
+			1.0f + Pulse * 0.08f,
+			1.0f + Pulse * 0.05f,
+			1.0f - Pulse * 0.06f,
+			1.0f);
+	}
+	else
+	{
+		const float Sat = FMath::Clamp(1.0f - Pulse * 0.45f, 0.42f, 1.0f);
+		PP.ColorSaturation = FVector4(Sat, Sat, Sat, 1.0f);
+	}
+
+	PP.bOverride_BloomIntensity = true;
+	PP.BloomIntensity = bVerdictPostProcessCorrect ? (0.45f + Pulse * 1.0f) : (0.15f + Pulse * 0.35f);
+
+	PP.bOverride_AutoExposureBias = true;
+	PP.AutoExposureBias = bVerdictPostProcessCorrect ? (Pulse * 0.25f) : (-Pulse * 0.35f);
+
+	if (VerdictPostProcessElapsed >= VerdictPostProcessTotal)
+	{
+		VerdictPostProcessTotal = 0.0f;
+		RestorePostProcessAfterVerdictFeedback();
+	}
+}
+
+void UInspectionScreen::RestorePostProcessAfterVerdictFeedback()
+{
+	if (!MisjudgmentPPVolume)
+	{
+		return;
+	}
+
+	FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+	PP.bOverride_BloomIntensity = false;
+	PP.bOverride_AutoExposureBias = false;
+
+	if (MisjudgmentCount > 0)
+	{
+		const float Pressure = FMath::Clamp(MisjudgmentCount / 5.0f, 0.0f, 1.0f);
+		PP.bOverride_VignetteIntensity = true;
+		PP.VignetteIntensity = FMath::Lerp(0.35f, 1.10f, OpticalTargetEdgeOpacityT);
+		PP.bOverride_SceneFringeIntensity = true;
+		PP.SceneFringeIntensity = FMath::Lerp(0.0f, 2.5f, Pressure);
+		PP.bOverride_ColorSaturation = true;
+		PP.ColorSaturation = FVector4(
+			FMath::Lerp(1.0f, 0.78f, Pressure),
+			FMath::Lerp(1.0f, 0.78f, Pressure),
+			FMath::Lerp(1.0f, 0.78f, Pressure),
+			1.0f);
+	}
+	else
+	{
+		PP.bOverride_VignetteIntensity = false;
+		PP.bOverride_SceneFringeIntensity = false;
+		PP.bOverride_ColorSaturation = false;
+	}
 }
 
 void UInspectionScreen::HandleDollTimeout()
@@ -921,6 +1054,13 @@ void UInspectionScreen::RenderJudgmentCardsList()
 void UInspectionScreen::RenderCurrentDoll()
 {
 	if (!DollAttributeText) return;
+	if (DollActor && bHideDollAttributeTextWhenDollActorSpawn)
+	{
+		DollAttributeText->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	DollAttributeText->SetVisibility(ESlateVisibility::HitTestInvisible);
 
 	if (DollSequence.Num() == 0)
 	{
@@ -991,6 +1131,63 @@ void UInspectionScreen::ClearDeskCards()
 		if (A) A->Destroy();
 	}
 	DeskCardActors.Reset();
+	DeskCardStartLocations.Reset();
+	DeskCardTargetLocations.Reset();
+	DeskCardStartRotations.Reset();
+	DeskCardTargetRotations.Reset();
+	DeskCardDropElapsed.Reset();
+	DeskCardDropDelay.Reset();
+
+	if (JudgmentCardListText)
+	{
+		JudgmentCardListText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
+}
+
+void UInspectionScreen::UpdateDeskCardDrops(float DeltaSeconds)
+{
+	const int32 Count = DeskCardActors.Num();
+	if (Count == 0)
+	{
+		return;
+	}
+
+	int32 ValidCount = Count;
+	ValidCount = FMath::Min(ValidCount, DeskCardStartLocations.Num());
+	ValidCount = FMath::Min(ValidCount, DeskCardTargetLocations.Num());
+	ValidCount = FMath::Min(ValidCount, DeskCardStartRotations.Num());
+	ValidCount = FMath::Min(ValidCount, DeskCardTargetRotations.Num());
+	ValidCount = FMath::Min(ValidCount, DeskCardDropElapsed.Num());
+	ValidCount = FMath::Min(ValidCount, DeskCardDropDelay.Num());
+
+	for (int32 i = 0; i < ValidCount; ++i)
+	{
+		AActor* CardActor = DeskCardActors[i];
+		if (!CardActor)
+		{
+			continue;
+		}
+
+		if (DeskCardDropDelay[i] > 0.0f)
+		{
+			DeskCardDropDelay[i] = FMath::Max(0.0f, DeskCardDropDelay[i] - DeltaSeconds);
+			continue;
+		}
+
+		if (DeskCardDropElapsed[i] >= DeskCardDropDurationSec)
+		{
+			continue;
+		}
+
+		DeskCardDropElapsed[i] = FMath::Min(DeskCardDropElapsed[i] + DeltaSeconds, DeskCardDropDurationSec);
+		const float T = DeskCardDropElapsed[i] / FMath::Max(0.05f, DeskCardDropDurationSec);
+		const float MoveT = EaseOutCubic(T);
+		const float Bounce = FMath::Sin(T * PI) * 8.0f * (1.0f - T);
+
+		const FVector Loc = FMath::Lerp(DeskCardStartLocations[i], DeskCardTargetLocations[i], MoveT) + FVector(0.0f, 0.0f, Bounce);
+		const FRotator Rot = FMath::Lerp(DeskCardStartRotations[i], DeskCardTargetRotations[i], MoveT);
+		CardActor->SetActorLocationAndRotation(Loc, Rot);
+	}
 }
 
 void UInspectionScreen::SpawnDeskCards()
@@ -1021,11 +1218,13 @@ void UInspectionScreen::SpawnDeskCards()
 		if (!Card) continue;
 
 		// 在 doll 前方排开（X≈-30），Y 方向 spread 让相机视野能看见
-		const FVector Loc = DeskCardOrigin + FVector(0.0f, i * DeskCardSpacing, 0.0f);
+		const FVector TargetLoc = DeskCardOrigin + FVector(0.0f, i * DeskCardSpacing, 0.0f);
+		const FVector StartLoc = TargetLoc + FVector(0.0f, 0.0f, DeskCardDropHeight + i * 18.0f);
+		const FRotator StartRot = DeskCardRotation + FRotator(0.0f, 0.0f, (i - (JudgmentCards.Num() - 1) * 0.5f) * -10.0f);
 
 		FActorSpawnParameters SP;
 		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		AStaticMeshActor* Card3D = World->SpawnActor<AStaticMeshActor>(Loc, DeskCardRotation, SP);
+		AStaticMeshActor* Card3D = World->SpawnActor<AStaticMeshActor>(StartLoc, StartRot, SP);
 		if (!Card3D) continue;
 
 		Card3D->SetMobility(EComponentMobility::Movable);
@@ -1045,6 +1244,17 @@ void UInspectionScreen::SpawnDeskCards()
 			MC->SetScalarParameterValueOnMaterials(TEXT("Intensity"), 2.5f);
 		}
 		DeskCardActors.Add(Card3D);
+		DeskCardStartLocations.Add(StartLoc);
+		DeskCardTargetLocations.Add(TargetLoc);
+		DeskCardStartRotations.Add(StartRot);
+		DeskCardTargetRotations.Add(DeskCardRotation);
+		DeskCardDropElapsed.Add(0.0f);
+		DeskCardDropDelay.Add(i * DeskCardDropStaggerSec);
+	}
+
+	if (JudgmentCardListText && bHideJudgmentTextWhenDeskCardsSpawn && DeskCardActors.Num() > 0)
+	{
+		JudgmentCardListText->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("[InspectionScreen] 桌面 spawn 了 %d 张 3D 纸卡"), DeskCardActors.Num());

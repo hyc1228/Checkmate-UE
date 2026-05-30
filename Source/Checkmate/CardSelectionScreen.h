@@ -11,6 +11,7 @@ class UJudgmentCardWidget;
 class UPanelWidget;
 class UButton;
 class UTextBlock;
+class UProgressBar;
 class UCh1LocSubsystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAssemblyComplete, const TArray<UCardData*>&, SelectedCards);
@@ -69,19 +70,19 @@ public:
 
 	/** 扇形总展开角度（度）。值越大扇越宽。13 张卡推荐 30-50。 */
 	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Fan", meta=(ClampMin="0.0", ClampMax="180.0"))
-	float FanSpreadDegrees = 36.0f;
+	float FanSpreadDegrees = 24.0f;
 
 	/** 相邻两张卡的水平间距（像素）。< CardWidth 即有重叠。 */
 	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Fan", meta=(ClampMin="10.0"))
-	float CardSpacingPx = 65.0f;
+	float CardSpacingPx = 118.0f;
 
 	/** 单张卡渲染宽度（像素）。同时设 WBP_JudgmentCard 里 SizeBox 一致。 */
 	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Fan", meta=(ClampMin="40.0"))
-	float CardWidth = 120.0f;
+	float CardWidth = 176.0f;
 
 	/** 单张卡渲染高度（像素）。同时设 WBP_JudgmentCard 里 SizeBox 一致。 */
 	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Fan", meta=(ClampMin="60.0"))
-	float CardHeight = 180.0f;
+	float CardHeight = 256.0f;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -108,6 +109,14 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UTextBlock* PurityText = nullptr;
 
+	/** Optional visual fill for selected-card progress, so WBP can reduce text-heavy UI. */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UProgressBar* SelectionProgressBar = nullptr;
+
+	/** Optional visual fill for Pearl-compatible purity pressure. */
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UProgressBar* PurityProgressBar = nullptr;
+
 	/** Begin Shift 按钮上的文字（本地化驱动）。 */
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
 	UTextBlock* BeginShiftLabel = nullptr;
@@ -129,6 +138,14 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category="CardSelection|Events")
 	void OnBeginShiftButtonEnableChanged(bool bEnabled);
 
+	/** WBP hook for a non-text burst when the chosen hand commits. */
+	UFUNCTION(BlueprintImplementableEvent, Category="CardSelection|Events")
+	void OnAssemblyCommitStarted();
+
+	/** WBP hook for icon meters, card slots, and juice layers driven by selection state. */
+	UFUNCTION(BlueprintImplementableEvent, Category="CardSelection|Events")
+	void OnSelectionVisualsChanged(int32 SelectedCount, int32 RequiredCount, float PurityRatio);
+
 private:
 	UPROPERTY()
 	TArray<UCardData*> PoolCards;
@@ -145,8 +162,21 @@ private:
 	TArray<UJudgmentCardWidget*> AllCardWidgets;
 
 	FTimerHandle CountdownTimerHandle;
+	FTimerHandle CommitAnimationTimerHandle;
+	bool bCommitAnimationPlaying = false;
+
+	UPROPERTY()
+	TArray<UCardData*> PendingSelectedData;
+
+	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Commit Juice", meta=(ClampMin="0.05"))
+	float CommitAnimationDurationSec = 0.85f;
+
+	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Commit Juice", meta=(ClampMin="0.0"))
+	float CardOutroStaggerSec = 0.045f;
 
 	void TickCountdown();
+	void StartAssemblyCommitAnimation();
+	void FinishAssemblyCommit();
 
 	/** 根据 SelectedCards.Num() 刷新 Confirm 按钮可点状态。 */
 	void RefreshConfirmEnabled();

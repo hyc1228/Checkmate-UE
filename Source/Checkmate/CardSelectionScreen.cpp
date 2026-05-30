@@ -11,6 +11,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/PanelWidget.h"
+#include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -57,11 +58,15 @@ void UCardSelectionScreen::NativeConstruct()
 		if (N > 1)
 		{
 			const int32 CenterIdx = N / 2;
+			const float EffectiveCardWidth = N <= 5 ? FMath::Max(CardWidth, 176.0f) : CardWidth;
+			const float EffectiveCardHeight = N <= 5 ? FMath::Max(CardHeight, 256.0f) : CardHeight;
+			const float EffectiveCardSpacing = N <= 5 ? FMath::Max(CardSpacingPx, 112.0f) : CardSpacingPx;
+			const float EffectiveFanSpread = N <= 5 ? FMath::Min(FanSpreadDegrees, 28.0f) : FanSpreadDegrees;
 
 			for (int32 i = 0; i < N; ++i)
 			{
 				const float t = (static_cast<float>(i) / static_cast<float>(N - 1)) - 0.5f;
-				const float AngleDeg = t * FanSpreadDegrees;
+				const float AngleDeg = t * EffectiveFanSpread;
 
 				UJudgmentCardWidget* Card = AllCardWidgets[i];
 				Card->SetBaseFanAngle(AngleDeg);
@@ -70,9 +75,9 @@ void UCardSelectionScreen::NativeConstruct()
 				{
 					CanvasSlot->SetAnchors(FAnchors(0.5f, 1.0f));    // panel 底部中央
 					CanvasSlot->SetAlignment(FVector2D(0.5f, 1.0f)); // Position 指向 widget 底部中央
-					CanvasSlot->SetSize(FVector2D(CardWidth, CardHeight));
+					CanvasSlot->SetSize(FVector2D(EffectiveCardWidth, EffectiveCardHeight));
 
-					const float Offset = (i - (N - 1) * 0.5f) * CardSpacingPx;
+					const float Offset = (i - (N - 1) * 0.5f) * EffectiveCardSpacing;
 					CanvasSlot->SetPosition(FVector2D(Offset, 0.0f));
 
 					// 中央 z-order 最高，向两边递减
@@ -103,6 +108,16 @@ void UCardSelectionScreen::NativeConstruct()
 		TimerLabel->SetText(FText::FromString(TEXT("—")));
 	}
 
+	if (UWorld* World = GetWorld())
+	{
+		TimeRemaining = AssemblyTimerSec;
+		World->GetTimerManager().SetTimer(
+			CountdownTimerHandle,
+			FTimerDelegate::CreateUObject(this, &UCardSelectionScreen::TickCountdown),
+			0.1f,
+			true);
+	}
+
 	// 订阅语言切换 → 重 push 文本
 	if (UCh1LocSubsystem* Loc = GetLoc())
 	{
@@ -117,6 +132,7 @@ void UCardSelectionScreen::NativeDestruct()
 	if (GetWorld())
 	{
 		GetWorld()->GetTimerManager().ClearTimer(CountdownTimerHandle);
+		GetWorld()->GetTimerManager().ClearTimer(CommitAnimationTimerHandle);
 	}
 
 	if (BeginShiftButton)
@@ -220,7 +236,7 @@ void UCardSelectionScreen::TickCountdown()
 
 void UCardSelectionScreen::HandleCardClicked(UJudgmentCardWidget* ClickedCard)
 {
-	if (!ClickedCard) return;
+	if (!ClickedCard || bCommitAnimationPlaying) return;
 
 	const int32 ExistingIdx = SelectedCards.IndexOfByKey(ClickedCard);
 	if (ExistingIdx != INDEX_NONE)
@@ -246,7 +262,7 @@ void UCardSelectionScreen::HandleCardClicked(UJudgmentCardWidget* ClickedCard)
 
 void UCardSelectionScreen::RefreshConfirmEnabled()
 {
-	const bool bShouldEnable = (SelectedCards.Num() >= K);
+	const bool bShouldEnable = (SelectedCards.Num() >= K) && !bCommitAnimationPlaying;
 	if (BeginShiftButton)
 	{
 		BeginShiftButton->SetIsEnabled(bShouldEnable);
@@ -264,6 +280,27 @@ void UCardSelectionScreen::RefreshConfirmEnabled()
 	}
 
 	// Pearl 纯净度：选中卡里 Pearl-compatible 的张数（spec：Pearl 主路径暗示）
+	int32 VisualPearlCount = 0;
+	const TArray<UCardData*> VisualPickedCards = GetAssembledCardData();
+	for (const UCardData* Card : VisualPickedCards)
+	{
+		if (Card && Card->bIsPearlCompatible)
+		{
+			++VisualPearlCount;
+		}
+	}
+	const float SelectionRatio = K > 0 ? static_cast<float>(SelectedCards.Num()) / static_cast<float>(K) : 0.0f;
+	const float PurityRatio = K > 0 ? static_cast<float>(VisualPearlCount) / static_cast<float>(K) : 0.0f;
+	if (SelectionProgressBar)
+	{
+		SelectionProgressBar->SetPercent(FMath::Clamp(SelectionRatio, 0.0f, 1.0f));
+	}
+	if (PurityProgressBar)
+	{
+		PurityProgressBar->SetPercent(FMath::Clamp(PurityRatio, 0.0f, 1.0f));
+	}
+	OnSelectionVisualsChanged(SelectedCards.Num(), K, PurityRatio);
+
 	if (PurityText)
 	{
 		int32 PearlCount = 0;
@@ -290,20 +327,78 @@ void UCardSelectionScreen::RefreshConfirmEnabled()
 
 void UCardSelectionScreen::OnBeginShiftClicked()
 {
+	if (bCommitAnimationPlaying || SelectedCards.Num() < K)
+	{
+		return;
+	}
+
 	UAudioService::PlayCueStatic(this, FName("UI.Click"));
+	UAudioService::PlayCueStatic(this, FName("Ch1.CardPlace"), 0.65f);
 
 	if (GetWorld())
 	{
 		GetWorld()->GetTimerManager().ClearTimer(CountdownTimerHandle);
 	}
 
-	TArray<UCardData*> SelectedData = GetAssembledCardData();
-	OnAssemblyComplete.Broadcast(SelectedData);
+	StartAssemblyCommitAnimation();
+}
+
+void UCardSelectionScreen::StartAssemblyCommitAnimation()
+{
+	bCommitAnimationPlaying = true;
+	PendingSelectedData = GetAssembledCardData();
 
 	if (BeginShiftButton)
 	{
 		BeginShiftButton->SetIsEnabled(false);
+		OnBeginShiftButtonEnableChanged(false);
 	}
+
+	OnAssemblyCommitStarted();
+
+	int32 DiscardIdx = 0;
+	for (int32 i = 0; i < AllCardWidgets.Num(); ++i)
+	{
+		UJudgmentCardWidget* Card = AllCardWidgets[i];
+		if (!Card) continue;
+
+		const int32 SelectedIdx = SelectedCards.IndexOfByKey(Card);
+		if (SelectedIdx != INDEX_NONE)
+		{
+			Card->PlaySelectionCommitDrop(SelectedIdx, SelectedCards.Num(), SelectedIdx * CardOutroStaggerSec);
+		}
+		else
+		{
+			const float Direction = (i < AllCardWidgets.Num() * 0.5f) ? -1.0f : 1.0f;
+			Card->PlaySelectionDiscardFly(DiscardIdx, AllCardWidgets.Num(), Direction, DiscardIdx * CardOutroStaggerSec);
+			++DiscardIdx;
+		}
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			CommitAnimationTimerHandle,
+			FTimerDelegate::CreateUObject(this, &UCardSelectionScreen::FinishAssemblyCommit),
+			CommitAnimationDurationSec,
+			false);
+	}
+	else
+	{
+		FinishAssemblyCommit();
+	}
+}
+
+void UCardSelectionScreen::FinishAssemblyCommit()
+{
+	if (!bCommitAnimationPlaying)
+	{
+		return;
+	}
+
+	bCommitAnimationPlaying = false;
+	OnAssemblyComplete.Broadcast(PendingSelectedData);
+	PendingSelectedData.Reset();
 }
 
 TArray<UCardData*> UCardSelectionScreen::GetAssembledCardData() const

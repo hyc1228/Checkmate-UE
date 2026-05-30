@@ -72,7 +72,30 @@ USoundBase* UAudioService::ResolveNativeCue(FName Key) const
 {
 	if (!CueTable) return nullptr;
 	USoundBase* const* Found = CueTable->NativeCues.Find(Key);
-	return Found ? *Found : nullptr;
+	if (Found && *Found)
+	{
+		return *Found;
+	}
+
+	// Design-spec cue aliases: these keys exist in code now, while final SFX assets can be bound later.
+	static const TMap<FName, FName> FallbackAliases = {
+		{ FName("Ch1.CardPlace"), FName("UI.Click") },
+		{ FName("Ch1.CardPickup"), FName("UI.Hover") },
+		{ FName("Ch1.RejectChain"), FName("Ch1.Toss") },
+		{ FName("Ch1.ChuteEcho"), FName("Ch1.Toss") },
+		{ FName("Ch1.PanelOpen"), FName("UI.Click") },
+		{ FName("Ch1.PanelMajor"), FName("Ch1.ShiftPass") },
+		{ FName("Ch1.PanelRetry"), FName("Ch1.Wrong") },
+		{ FName("Ch1.PanelTwistLeadIn"), FName("Twist.DroneAscent") }
+	};
+	if (const FName* Alias = FallbackAliases.Find(Key))
+	{
+		if (USoundBase* const* AliasCue = CueTable->NativeCues.Find(*Alias))
+		{
+			return *AliasCue;
+		}
+	}
+	return nullptr;
 }
 
 bool UAudioService::ResolveFmodEvent(FName Key, FString& OutEventPath) const

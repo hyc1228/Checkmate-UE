@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Ch1ProgressPanelWidget.h"
 #include "GameFramework/GameModeBase.h"
 #include "InspectionScreen.h"  // for FShiftResult / FOnShiftCompleted signature
 #include "Chapter1GameMode.generated.h"
@@ -13,6 +14,9 @@ class UDollData;
 class UUserWidget;
 class ADollDisplay;
 class UCh1LocStrings;
+class APostProcessVolume;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCh1PresentationCue, FName, CueId, int32, ShiftNumber, ECh1ProgressPanelMoment, Moment);
 
 /**
  * 单个班次配置。在 BP_Chapter1GameMode.Shifts 数组里逐条填。
@@ -64,6 +68,22 @@ struct FShiftConfig
 	/** 累积误判到此数 → 班次失败（玩家被回选卡屏重新组装）。0 = 永不失败。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="0"))
 	int32 MaxMisjudgmentsBeforeFail = 3;
+
+	/** Optional day/shift reveal copy. Empty fields use generated fallback text. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Presentation")
+	FText PanelEyebrow;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Presentation")
+	FText PanelTitle;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Presentation")
+	FText PanelBody;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Presentation")
+	FName PanelCueId = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Presentation")
+	bool bMajorPresentationBeat = false;
 };
 
 /**
@@ -91,6 +111,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
 	TSubclassOf<UUserWidget> ShiftTransitionWidgetClass;
 
+	/** Preferred day/shift panel. If unset, a native fallback panel is used. */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
+	TSubclassOf<UCh1ProgressPanelWidget> ProgressPanelWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Presentation")
+	bool bUseNativeProgressPanelFallback = true;
+
 	/** 3D 娃娃 actor class（继承 ADollDisplay；可在 BP_DollDisplay 调 mesh / 颜色等）。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
 	TSubclassOf<ADollDisplay> DollActorClass;
@@ -98,6 +125,16 @@ public:
 	/** 3D 娃娃 spawn 位置（世界坐标）。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene")
 	FTransform DollSpawnTransform = FTransform(FRotator::ZeroRotator, FVector(0.0f, 0.0f, 100.0f));
+
+	/** Runtime camera polish for the graybox Ch1 test map. Keeps the doll/table visible without editing the map asset. */
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera")
+	bool bOverrideInspectionCameraTransform = true;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera", meta=(EditCondition="bOverrideInspectionCameraTransform"))
+	FVector RuntimeCameraLocation = FVector(-520.0f, -320.0f, 430.0f);
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera", meta=(EditCondition="bOverrideInspectionCameraTransform"))
+	FVector RuntimeCameraLookAt = FVector(0.0f, 0.0f, 140.0f);
 
 	/** 本地化字典 asset（拖 DA_Ch1Loc 进来）。BeginPlay 注入到 UCh1LocSubsystem。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
@@ -110,6 +147,24 @@ public:
 	/** 班次间过场停留时长（秒）。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Shifts", meta=(ClampMin="0.5"))
 	float TransitionHoldSeconds = 2.5f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Presentation", meta=(ClampMin="0.5"))
+	float InitialPanelHoldSeconds = 2.6f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Presentation", meta=(ClampMin="0.0"))
+	float ProgressPanelPostProcessDuration = 0.75f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Presentation", meta=(ClampMin="0.0"))
+	float ProgressPanelPostProcessPeak = 0.85f;
+
+	UPROPERTY(BlueprintAssignable, Category="Ch1|Presentation")
+	FOnCh1PresentationCue OnPresentationCue;
+
+	UFUNCTION(BlueprintCallable, Category="Ch1|Presentation")
+	void TriggerPresentationCue(FName CueId, int32 ShiftNumber, ECh1ProgressPanelMoment Moment, bool bMajorBeat);
+
+	UFUNCTION(BlueprintImplementableEvent, Category="Ch1|Presentation")
+	void K2_OnPresentationCue(FName CueId, int32 ShiftNumber, ECh1ProgressPanelMoment Moment, bool bMajorBeat);
 
 	// ── Twist (Ch1 → Ch2 翻转) ──────────────────────────────────────────────
 
@@ -157,6 +212,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 private:
 	UPROPERTY()
@@ -180,12 +236,31 @@ private:
 	void HandleShiftCompleted(FShiftResult Result);
 
 	void BeginShift(int32 ShiftIdx);
+	void ShowShiftIntro(int32 ShiftIdx);
 	void ShowShiftTransition(int32 NextShiftIdx);
+	void ShowRetryTransition();
+	void ShowProgressPanel(
+		int32 ShiftIdx,
+		ECh1ProgressPanelMoment Moment,
+		float HoldSeconds,
+		FTimerDelegate CompletionDelegate);
 	void FinishCh1();
 	void PlayTwistOpticalBurnout();
 	void SetUIInputMode();
+	void ApplyRuntimeCameraFraming(AActor* CameraActor) const;
+	FCh1ProgressPanelPayload BuildProgressPanelPayload(int32 ShiftIdx, ECh1ProgressPanelMoment Moment) const;
+	void StartProgressPanelPostProcessCue(bool bMajorBeat);
+	void UpdateProgressPanelPostProcessCue(float DeltaSeconds);
 
 	void OpenCh2Map();
 	FTimerHandle TwistHoldTimer;
 	FTimerHandle TwistOpticalBurnoutTimer;
+	FTimerHandle ProgressPanelTimer;
+
+	UPROPERTY()
+	APostProcessVolume* ProgressPanelPostProcessVolume = nullptr;
+
+	float ProgressPanelPostProcessElapsed = 0.0f;
+	bool bProgressPanelPostProcessActive = false;
+	bool bProgressPanelPostProcessMajor = false;
 };

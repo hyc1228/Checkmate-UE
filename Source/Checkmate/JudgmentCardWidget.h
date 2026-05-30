@@ -59,6 +59,17 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Card|Selection")
 	bool IsSelected() const { return bIsSelected; }
 
+	/** Commit animation: selected cards drop toward the table area before the shift starts. */
+	UFUNCTION(BlueprintCallable, Category="Card|Juice")
+	void PlaySelectionCommitDrop(int32 SelectionIndex, int32 TotalSelected, float DelaySeconds = 0.0f);
+
+	/** Commit animation: unselected cards leave the hand instead of simply disappearing. */
+	UFUNCTION(BlueprintCallable, Category="Card|Juice")
+	void PlaySelectionDiscardFly(int32 CardIndex, int32 TotalCards, float DirectionSign, float DelaySeconds = 0.0f);
+
+	UFUNCTION(BlueprintCallable, Category="Card|Juice")
+	void SetInteractionLocked(bool bLocked);
+
 	/** 扇形铺开：每张卡有一个 base 旋转角度（度），叠加在 tilt 之上。Screen 在构造时分配。 */
 	UFUNCTION(BlueprintCallable, Category="Card|Layout")
 	void SetBaseFanAngle(float DegAngle) { BaseFanAngle = DegAngle; }
@@ -81,6 +92,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Hover", meta=(ClampMin="1.0", ClampMax="1.5"))
 	float HoverScaleMultiplier = 1.05f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Visuals")
+	bool bUseCompactCardLabel = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Visuals", meta=(ClampMin="32.0"))
+	FVector2D FallbackCardImageSize = FVector2D(160.0f, 220.0f);
+
 	/** 被选中时永久上浮像素（Balatro：选中后停留在抬起状态）。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Selection", meta=(ClampMin="0.0"))
 	float SelectedLiftPixels = 32.0f;
@@ -88,6 +105,20 @@ public:
 	/** 平滑插值速度（越大越快回到目标）。10-20 之间感觉跟手。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Smoothing", meta=(ClampMin="1.0", ClampMax="50.0"))
 	float SmoothingSpeed = 14.0f;
+
+	/** How long selected cards take to drop into the desk area on commit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Commit Juice", meta=(ClampMin="0.05"))
+	float CommitDropDurationSec = 0.48f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Commit Juice", meta=(ClampMin="0.0"))
+	float CommitDropDistancePixels = 230.0f;
+
+	/** How long unselected cards take to fly away and fade on commit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Commit Juice", meta=(ClampMin="0.05"))
+	float DiscardFlyDurationSec = 0.42f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Commit Juice", meta=(ClampMin="0.0"))
+	float DiscardFlyDistancePixels = 360.0f;
 
 	/** Material 参数名（与 M_JudgmentCard_2D 里定义的同名）。可在 WBP 里覆盖。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Material Binding")
@@ -155,10 +186,30 @@ private:
 	bool bIsSelected = false;
 	bool bPressing = false;  // 鼠标按下中——up 时若仍 hovered 视为 click
 	float BaseFanAngle = 0.0f;
+	bool bInteractionLocked = false;
+
+	bool bOutroActive = false;
+	float OutroDelayRemaining = 0.0f;
+	float OutroElapsed = 0.0f;
+	float OutroDuration = 0.0f;
+	FVector2D OutroStartOffset = FVector2D::ZeroVector;
+	FVector2D OutroTargetOffset = FVector2D::ZeroVector;
+	FVector2D CurrentOutroOffset = FVector2D::ZeroVector;
+	float OutroStartAngleAdd = 0.0f;
+	float OutroTargetAngleAdd = 0.0f;
+	float CurrentOutroAngleAdd = 0.0f;
+	float OutroStartScale = 1.0f;
+	float OutroTargetScale = 1.0f;
+	float CurrentOutroScale = 1.0f;
+	float OutroStartOpacity = 1.0f;
+	float OutroTargetOpacity = 1.0f;
+	float CurrentOutroOpacity = 1.0f;
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* CardMID = nullptr;
 
 	void ApplyTiltToTransform();
+	void StartOutro(const FVector2D& TargetOffset, float TargetAngleAdd, float InTargetScale, float InTargetOpacity, float DurationSec, float DelaySeconds);
+	void TickOutro(float InDeltaTime);
 	FVector2D CalculateNormalizedTilt(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) const;
 };

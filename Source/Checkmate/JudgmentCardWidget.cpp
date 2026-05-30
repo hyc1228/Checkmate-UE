@@ -15,6 +15,20 @@
 namespace
 {
 	constexpr int32 HoverZOrderBoost = 1000;
+
+	float EaseOutCubic(float T)
+	{
+		const float Clamped = FMath::Clamp(T, 0.0f, 1.0f);
+		return 1.0f - FMath::Pow(1.0f - Clamped, 3.0f);
+	}
+
+	float EaseOutBack(float T)
+	{
+		const float Clamped = FMath::Clamp(T, 0.0f, 1.0f);
+		constexpr float C1 = 1.70158f;
+		constexpr float C3 = C1 + 1.0f;
+		return 1.0f + C3 * FMath::Pow(Clamped - 1.0f, 3.0f) + C1 * FMath::Pow(Clamped - 1.0f, 2.0f);
+	}
 }
 
 UJudgmentCardWidget::UJudgmentCardWidget(const FObjectInitializer& ObjectInitializer)
@@ -51,11 +65,21 @@ void UJudgmentCardWidget::SetCardData(UCardData* InCardData)
 
 	if (LabelText)
 	{
-		LabelText->SetText(CardData->DisplayLabel);
+		FString CompactLabel = CardData->DisplayLabel.ToString();
+		if (bUseCompactCardLabel)
+		{
+			CompactLabel.RemoveFromStart(TEXT("必须"));
+			CompactLabel.RemoveFromStart(TEXT("Must "));
+			CompactLabel.RemoveFromStart(TEXT("must "));
+			CompactLabel = CompactLabel.TrimStartAndEnd();
+		}
+		LabelText->SetText(FText::FromString(CompactLabel));
+		LabelText->SetAutoWrapText(true);
 	}
 
 	if (CardImage)
 	{
+		CardImage->SetDesiredSizeOverride(FallbackCardImageSize);
 		// 优先用 CardData.IconTexture（玩家拖图进去就自动接管）；没图回退维度色块。
 		UTexture2D* IconTex = CardData->IconTexture.IsNull() ? nullptr : CardData->IconTexture.LoadSynchronous();
 		if (IconTex)
@@ -102,6 +126,7 @@ void UJudgmentCardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 	CurrentTilt = FMath::Vector2DInterpTo(CurrentTilt, TargetTilt, InDeltaTime, SmoothingSpeed);
 	CurrentLift = FMath::FInterpTo(CurrentLift, TargetLift, InDeltaTime, SmoothingSpeed);
 	CurrentScale = FMath::FInterpTo(CurrentScale, TargetScale, InDeltaTime, SmoothingSpeed);
+	TickOutro(InDeltaTime);
 
 	ApplyTiltToTransform();
 
@@ -131,6 +156,7 @@ void UJudgmentCardWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const 
 {
 	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
 
+	if (bInteractionLocked) return;
 	if (bIsHovered) return;  // 防重入（drag visual 等 corner case）
 
 	bIsHovered = true;
@@ -169,6 +195,11 @@ void UJudgmentCardWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
 
 FReply UJudgmentCardWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (bInteractionLocked)
+	{
+		return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
+	}
+
 	if (bIsHovered)
 	{
 		TargetTilt = CalculateNormalizedTilt(InGeometry, InMouseEvent);
@@ -179,6 +210,11 @@ FReply UJudgmentCardWidget::NativeOnMouseMove(const FGeometry& InGeometry, const
 
 FReply UJudgmentCardWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (bInteractionLocked)
+	{
+		return FReply::Handled();
+	}
+
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		bPressing = true;
@@ -189,6 +225,12 @@ FReply UJudgmentCardWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry,
 
 FReply UJudgmentCardWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (bInteractionLocked)
+	{
+		bPressing = false;
+		return FReply::Handled();
+	}
+
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bPressing)
 	{
 		bPressing = false;
@@ -208,6 +250,119 @@ void UJudgmentCardWidget::SetSelected(bool bInSelected)
 	bIsSelected = bInSelected;
 	TargetLift = ComputeTargetLift(bIsSelected, bIsHovered, HoverLiftPixels, SelectedLiftPixels);
 	OnSelectedChanged(bIsSelected);
+}
+
+void UJudgmentCardWidget::SetInteractionLocked(bool bLocked)
+{
+	if (bInteractionLocked == bLocked) return;
+	bInteractionLocked = bLocked;
+	bPressing = false;
+
+	if (bInteractionLocked)
+	{
+		if (bIsHovered)
+		{
+			if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot))
+			{
+				CanvasSlot->SetZOrder(CanvasSlot->GetZOrder() - HoverZOrderBoost);
+			}
+			bIsHovered = false;
+			OnHoverEnd();
+		}
+		TargetTilt = FVector2D::ZeroVector;
+		TargetLift = ComputeTargetLift(bIsSelected, false, HoverLiftPixels, SelectedLiftPixels);
+		TargetScale = 1.0f;
+	}
+}
+
+void UJudgmentCardWidget::PlaySelectionCommitDrop(int32 SelectionIndex, int32 TotalSelected, float DelaySeconds)
+{
+	SetInteractionLocked(true);
+
+	const int32 SafeTotal = FMath::Max(1, TotalSelected);
+	const float CenteredIndex = static_cast<float>(SelectionIndex) - (static_cast<float>(SafeTotal - 1) * 0.5f);
+	const float TableSpread = 74.0f;
+	const float SettleAngle = CenteredIndex * 3.5f;
+	FVector2D TargetOffset(CenteredIndex * TableSpread, CommitDropDistancePixels);
+
+	if (const UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot))
+	{
+		TargetOffset.X -= CanvasSlot->GetPosition().X * 0.35f;
+	}
+
+	StartOutro(
+		TargetOffset,
+		-BaseFanAngle + SettleAngle,
+		1.04f,
+		1.0f,
+		CommitDropDurationSec,
+		DelaySeconds);
+}
+
+void UJudgmentCardWidget::PlaySelectionDiscardFly(int32 CardIndex, int32 TotalCards, float DirectionSign, float DelaySeconds)
+{
+	SetInteractionLocked(true);
+
+	const float SafeSign = DirectionSign >= 0.0f ? 1.0f : -1.0f;
+	const float VerticalLift = -170.0f - (FMath::Max(0, CardIndex) % 5) * 18.0f;
+	const float ArcOffset = (TotalCards > 0 ? static_cast<float>(CardIndex) / static_cast<float>(TotalCards) : 0.0f) * 80.0f;
+	const FVector2D TargetOffset(
+		SafeSign * (DiscardFlyDistancePixels + ArcOffset),
+		VerticalLift);
+
+	StartOutro(
+		TargetOffset,
+		SafeSign * (32.0f + (CardIndex % 3) * 6.0f),
+		0.74f,
+		0.0f,
+		DiscardFlyDurationSec,
+		DelaySeconds);
+}
+
+void UJudgmentCardWidget::StartOutro(const FVector2D& TargetOffset, float TargetAngleAdd, float InTargetScale, float InTargetOpacity, float DurationSec, float DelaySeconds)
+{
+	bOutroActive = true;
+	OutroDelayRemaining = FMath::Max(0.0f, DelaySeconds);
+	OutroElapsed = 0.0f;
+	OutroDuration = FMath::Max(0.05f, DurationSec);
+
+	OutroStartOffset = CurrentOutroOffset;
+	OutroTargetOffset = TargetOffset;
+	OutroStartAngleAdd = CurrentOutroAngleAdd;
+	OutroTargetAngleAdd = TargetAngleAdd;
+	OutroStartScale = CurrentOutroScale;
+	OutroTargetScale = InTargetScale;
+	OutroStartOpacity = CurrentOutroOpacity;
+	OutroTargetOpacity = FMath::Clamp(InTargetOpacity, 0.0f, 1.0f);
+}
+
+void UJudgmentCardWidget::TickOutro(float InDeltaTime)
+{
+	if (!bOutroActive)
+	{
+		return;
+	}
+
+	if (OutroDelayRemaining > 0.0f)
+	{
+		OutroDelayRemaining -= InDeltaTime;
+		return;
+	}
+
+	OutroElapsed = FMath::Min(OutroElapsed + InDeltaTime, OutroDuration);
+	const float T = OutroElapsed / OutroDuration;
+	const float MoveT = EaseOutBack(T);
+	const float FadeT = EaseOutCubic(T);
+
+	CurrentOutroOffset = FMath::Lerp(OutroStartOffset, OutroTargetOffset, MoveT);
+	CurrentOutroAngleAdd = FMath::Lerp(OutroStartAngleAdd, OutroTargetAngleAdd, MoveT);
+	CurrentOutroScale = FMath::Lerp(OutroStartScale, OutroTargetScale, MoveT);
+	CurrentOutroOpacity = FMath::Lerp(OutroStartOpacity, OutroTargetOpacity, FadeT);
+
+	if (OutroElapsed >= OutroDuration)
+	{
+		bOutroActive = false;
+	}
 }
 
 FVector2D UJudgmentCardWidget::CalculateNormalizedTilt(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) const
@@ -233,15 +388,16 @@ void UJudgmentCardWidget::ApplyTiltToTransform()
 {
 	FWidgetTransform Transform;
 
-	Transform.Angle = BaseFanAngle + (-CurrentTilt.X * (MaxTiltAngleDegrees * 0.3f));
+	Transform.Angle = BaseFanAngle + CurrentOutroAngleAdd + (-CurrentTilt.X * (MaxTiltAngleDegrees * 0.3f));
 	Transform.Shear = FVector2D(
 		-CurrentTilt.Y * MaxShearAmount,
 		-CurrentTilt.X * MaxShearAmount
 	);
-	Transform.Translation = FVector2D(0.0f, -CurrentLift);
-	Transform.Scale = FVector2D(CurrentScale, CurrentScale);
+	Transform.Translation = FVector2D(0.0f, -CurrentLift) + CurrentOutroOffset;
+	Transform.Scale = FVector2D(CurrentScale * CurrentOutroScale, CurrentScale * CurrentOutroScale);
 
 	SetRenderTransform(Transform);
+	SetRenderOpacity(CurrentOutroOpacity);
 	// 旋转 pivot 设在底部中心——扇形铺开时卡只绕底边旋转，所有底边保持对齐
 	SetRenderTransformPivot(FVector2D(0.5f, 1.0f));
 }
