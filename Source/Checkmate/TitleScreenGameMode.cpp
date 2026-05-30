@@ -22,7 +22,7 @@
 
 ATitleScreenGameMode::ATitleScreenGameMode()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 	DefaultPawnClass = nullptr;
 	PlayerControllerClass = APlayerController::StaticClass();
 	PromptWidgetClass = UTitlePromptWidget::StaticClass();
@@ -60,6 +60,7 @@ void ATitleScreenGameMode::BeginPlay()
 	CollectDropComponents();
 	FreezeDropComponents();
 	FreezeTitleShardComponents();
+	CacheTitleShardBaseTransforms();
 
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PC)
@@ -86,6 +87,12 @@ void ATitleScreenGameMode::BeginPlay()
 	}
 }
 
+void ATitleScreenGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	UpdateTitleIdleShake(DeltaSeconds);
+}
+
 void ATitleScreenGameMode::StartTitleFall()
 {
 	if (bStarted)
@@ -94,6 +101,9 @@ void ATitleScreenGameMode::StartTitleFall()
 	}
 
 	bStarted = true;
+	RestoreTitleShardBaseTransforms();
+	SetActorTickEnabled(false);
+
 	if (PromptWidget)
 	{
 		PromptWidget->SetStarted(true);
@@ -299,12 +309,92 @@ void ATitleScreenGameMode::FreezeTitleShardComponents()
 			continue;
 		}
 
+		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetSimulatePhysics(false);
 		Component->SetEnableGravity(false);
 		Component->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 		Component->SetPhysicsLinearVelocity(FVector::ZeroVector);
 		Component->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
 		Component->PutAllRigidBodiesToSleep();
+	}
+}
+
+void ATitleScreenGameMode::CacheTitleShardBaseTransforms()
+{
+	TitleShardBaseWorldTransforms.Reset();
+	TitleShardShakePivot = FVector::ZeroVector;
+
+	int32 ValidComponentCount = 0;
+	for (UPrimitiveComponent* Component : TitleShardComponents)
+	{
+		if (!Component)
+		{
+			TitleShardBaseWorldTransforms.Add(FTransform::Identity);
+			continue;
+		}
+
+		const FTransform BaseTransform = Component->GetComponentTransform();
+		TitleShardBaseWorldTransforms.Add(BaseTransform);
+		TitleShardShakePivot += BaseTransform.GetLocation();
+		++ValidComponentCount;
+	}
+
+	if (ValidComponentCount > 0)
+	{
+		TitleShardShakePivot /= static_cast<float>(ValidComponentCount);
+	}
+}
+
+void ATitleScreenGameMode::RestoreTitleShardBaseTransforms()
+{
+	const int32 Count = FMath::Min(TitleShardComponents.Num(), TitleShardBaseWorldTransforms.Num());
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		UPrimitiveComponent* Component = TitleShardComponents[Index];
+		if (!Component)
+		{
+			continue;
+		}
+
+		Component->SetSimulatePhysics(false);
+		Component->SetWorldTransform(TitleShardBaseWorldTransforms[Index], false, nullptr, ETeleportType::TeleportPhysics);
+		Component->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		Component->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		Component->PutAllRigidBodiesToSleep();
+	}
+}
+
+void ATitleScreenGameMode::UpdateTitleIdleShake(float DeltaSeconds)
+{
+	if (bStarted || !bEnableTitleIdleShake || TitleShardComponents.Num() == 0 || TitleShardBaseWorldTransforms.Num() != TitleShardComponents.Num())
+	{
+		return;
+	}
+
+	TitleIdleShakeElapsedSeconds += DeltaSeconds;
+
+	const float Phase = TitleIdleShakeElapsedSeconds * TitleIdleShakeFrequency * 2.0f * PI;
+	const FVector SharedOffset(
+		FMath::Sin(Phase) * TitleIdleShakeAmplitude,
+		0.0f,
+		FMath::Sin(Phase * 0.73f + 1.7f) * TitleIdleShakeAmplitude * 0.55f);
+	const float SharedAngleRadians = FMath::DegreesToRadians(FMath::Sin(Phase * 0.91f + 0.35f) * TitleIdleShakeRotationDegrees);
+	const FQuat SharedRotation(FVector::YAxisVector, SharedAngleRadians);
+
+	for (int32 Index = 0; Index < TitleShardComponents.Num(); ++Index)
+	{
+		UPrimitiveComponent* Component = TitleShardComponents[Index];
+		if (!Component)
+		{
+			continue;
+		}
+
+		const FTransform& BaseTransform = TitleShardBaseWorldTransforms[Index];
+		const FVector BaseLocation = BaseTransform.GetLocation();
+		const FVector RotatedLocation = TitleShardShakePivot + SharedRotation.RotateVector(BaseLocation - TitleShardShakePivot) + SharedOffset;
+		const FQuat RotatedOrientation = SharedRotation * BaseTransform.GetRotation();
+		const FTransform ShakenTransform(RotatedOrientation, RotatedLocation, BaseTransform.GetScale3D());
+		Component->SetWorldTransform(ShakenTransform, false, nullptr, ETeleportType::TeleportPhysics);
 	}
 }
 

@@ -23,6 +23,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	UPROPERTY(EditDefaultsOnly, Category="Title")
 	FName FirstGameMapName = TEXT("Ch1Test");
@@ -51,6 +52,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Title")
 	TArray<FString> StaticNameHints;
 
+	UPROPERTY(EditDefaultsOnly, Category="Title|Idle Shake")
+	bool bEnableTitleIdleShake = true;
+
+	UPROPERTY(EditDefaultsOnly, Category="Title|Idle Shake", meta=(ClampMin="0.0"))
+	float TitleIdleShakeAmplitude = 2.4f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Title|Idle Shake", meta=(ClampMin="0.0"))
+	float TitleIdleShakeFrequency = 1.8f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Title|Idle Shake", meta=(ClampMin="0.0"))
+	float TitleIdleShakeRotationDegrees = 0.35f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Title|Camera")
 	FVector TitleCameraLocation = FVector(-61.0f, 700.0f, 200.0f);
 
@@ -70,7 +83,12 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UPrimitiveComponent>> TitleShardComponents;
 
+	UPROPERTY()
+	TArray<FTransform> TitleShardBaseWorldTransforms;
+
 	bool bStarted = false;
+	float TitleIdleShakeElapsedSeconds = 0.0f;
+	FVector TitleShardShakePivot = FVector::ZeroVector;
 	FTimerHandle OpenFirstMapTimerHandle;
 	FTimerHandle ReleaseTitleShardsTimerHandle;
 	FTimerHandle FadeToBlackTimerHandle;
@@ -81,6 +99,9 @@ private:
 	bool TextContainsAnyHint(const FString& Text, const TArray<FString>& Hints) const;
 	void FreezeDropComponents();
 	void FreezeTitleShardComponents();
+	void CacheTitleShardBaseTransforms();
+	void RestoreTitleShardBaseTransforms();
+	void UpdateTitleIdleShake(float DeltaSeconds);
 	void ReleaseTitleShards();
 	void StartFadeToBlack();
 	void ActivateTitleCamera(APlayerController* PC);
