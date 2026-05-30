@@ -47,6 +47,20 @@ bool ACh2GameMode::TryPlaySequence(FName Key)
 	return true;
 }
 
+void ACh2GameMode::PV_SetSequencerBakeActive(bool bActive)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH2_BAKE_MODE ignored in shipping build Requested=%s"), bActive ? TEXT("true") : TEXT("false"));
+#else
+	bPVSequencerBakeActive = bActive;
+	if (bPVSequencerBakeActive)
+	{
+		ResetFloorColorsToBoardPattern();
+	}
+	UE_LOG(LogTemp, Display, TEXT("PV_CH2_BAKE_MODE Active=%s"), bPVSequencerBakeActive ? TEXT("true") : TEXT("false"));
+#endif
+}
+
 void ACh2GameMode::BeginPlay()
 {
 	Super::BeginPlay();
@@ -61,6 +75,11 @@ void ACh2GameMode::BeginPlay()
 		UE_LOG(LogTemp, Error, TEXT("Ch2GameMode: PawnClass 未填"));
 		return;
 	}
+
+	UE_LOG(LogTemp, Display, TEXT("PV_CH2_CONFIG MoveBudget=%d PuppetExplodeAfterTurns=%d BakeMode=%s"),
+		LevelData->MoveBudget,
+		PuppetExplodeAfterTurns,
+		bPVSequencerBakeActive ? TEXT("true") : TEXT("false"));
 
 	BuildLevel();
 	SetUpTopDownCamera();
@@ -272,7 +291,7 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 
 	// sensorium 扩张：出口附近地板渐变成彩色（曼哈顿距离 ≤ ColorRadius）
 	const FIntPoint ExitCell = LevelData ? LevelData->FindCellOfType(ECh2CellType::Exit) : FIntPoint(-1, -1);
-	if (ExitCell.X >= 0)
+	if (!bPVSequencerBakeActive && ExitCell.X >= 0)
 	{
 		const int32 ColorRadius = 3;
 		const float ExitPulse = 0.5f + 0.5f * FMath::Sin(WorldElapsed * 2.0f);
@@ -297,7 +316,7 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 	}
 
 	// 出口 pulse：高灯柱 sin 强呼吸（青绿 ↔ 亮白绿）
-	if (ExitActor)
+	if (!bPVSequencerBakeActive && ExitActor)
 	{
 		if (AStaticMeshActor* SMA = Cast<AStaticMeshActor>(ExitActor))
 		{
@@ -349,6 +368,21 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 		const float Freq = 3.0f + Urgency * 12.0f;
 		const float ScaleBase = 0.6f + 0.15f * FMath::Sin(WorldElapsed * Freq);
 		MC->SetRelativeScale3D(FVector(ScaleBase, ScaleBase, ScaleBase));
+	}
+}
+
+void ACh2GameMode::ResetFloorColorsToBoardPattern()
+{
+	for (const TPair<FIntPoint, AActor*>& P : FloorActors)
+	{
+		AStaticMeshActor* SMA = Cast<AStaticMeshActor>(P.Value);
+		if (!SMA) continue;
+		UStaticMeshComponent* MC = SMA->GetStaticMeshComponent();
+		if (!MC) continue;
+
+		const bool bWhite = ((P.Key.X + P.Key.Y) % 2) == 0;
+		MC->SetVectorParameterValueOnMaterials(TEXT("Color"),
+			bWhite ? FVector(0.85f, 0.85f, 0.85f) : FVector(0.15f, 0.15f, 0.15f));
 	}
 }
 
@@ -849,6 +883,11 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 	else if (Type == ECh2CellType::Exit)
 	{
 		UE_LOG(LogTemp, Display, TEXT("Ch2: 抵达出口 — Ch2 Complete"));
+		if (bPVSequencerBakeActive)
+		{
+			UE_LOG(LogTemp, Display, TEXT("PV_CH2_BAKE_SUPPRESS VictoryUIAudio"));
+			return;
+		}
 		UAudioService::PlayCueStatic(this, FName("Ch2.Victory"));
 		// 优先播 Ch2.Victory sequence；fallback UMG victory screen
 		if (!TryPlaySequence(TEXT("Ch2.Victory")) && HUDWidget)

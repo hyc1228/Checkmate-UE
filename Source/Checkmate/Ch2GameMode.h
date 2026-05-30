@@ -139,6 +139,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch2|Sequences")
 	bool TryPlaySequence(FName Key);
 
+	/** PV 录制 bake 模式：停掉胜利 UI/音效与 Ch2 sensorium 彩色脉冲，方便 Sequencer 干净出片。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Ch2|PV")
+	bool bPVSequencerBakeActive = false;
+
+	UFUNCTION(Exec)
+	void PV_SetSequencerBakeActive(bool bActive = true);
+
 	/** 爆炸 camera shake 振幅（unit）+ 时长（秒）。直接由 Tick 实现。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0"))
 	float ExplosionShakeMagnitude = 12.0f;
@@ -240,6 +247,7 @@ protected:
 	void UpdatePathPreview(FIntPoint HoverCell, bool bValid);
 	void ClearPathPreview();
 	void SpawnClickRipple(const FVector& WorldPos);
+	void ResetFloorColorsToBoardPattern();
 
 	/** Ritual 拍点：close-up camera + 眼睛 glimpse（取扣→机械眼一闪→缝扣回 Pearl）。
 	 *  spec: switching-ritual.md §3 时序表。 */
