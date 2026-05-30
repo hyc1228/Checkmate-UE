@@ -160,8 +160,10 @@ private:
 	void BeginShift(int32 ShiftIdx);
 	void ShowShiftTransition(int32 NextShiftIdx);
 	void FinishCh1();
+	void PlayTwistOpticalBurnout();
 	void SetUIInputMode();
 
 	void OpenCh2Map();
 	FTimerHandle TwistHoldTimer;
+	FTimerHandle TwistOpticalBurnoutTimer;
 };

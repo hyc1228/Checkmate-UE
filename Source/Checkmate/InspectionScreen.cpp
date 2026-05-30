@@ -15,9 +15,11 @@
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
 #include "Engine/PostProcessVolume.h"
+#include "Engine/Scene.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Components/StaticMeshComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -64,6 +66,19 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	bHasDriftedFalseNeg = false;
 	bAwaitingNext = false;
 	bShiftEnded = false;
+	OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
+	OpticalEdgeOpacityT = OpticalTargetEdgeOpacityT = OpticalBaseOpacity;
+	OpticalEdgeRadiusT = OpticalTargetEdgeRadiusT = 0.0f;
+	OpticalPulseT = OpticalTargetPulseT = 0.0f;
+	OpticalInvertT = OpticalTargetInvertT = 0.0f;
+	OpticalBurnoutT = OpticalTargetBurnoutT = 0.0f;
+	OpticalMechanicalFadeT = OpticalTargetMechanicalFadeT = 0.0f;
+	OpticalSurgeRemainingSec = 0.0f;
+	OpticalSurgeTotalSec = 0.0f;
+	OpticalBurnoutRemainingSec = 0.0f;
+	OpticalBurnoutTotalSec = 0.0f;
+	OpticalFadeRemainingSec = 0.0f;
+	OpticalFadeTotalSec = 0.0f;
 
 	SpawnDeskCards();
 }
@@ -174,6 +189,13 @@ void UInspectionScreen::NativeDestruct()
 
 	ClearDeskCards();
 
+	if (MisjudgmentPPVolume)
+	{
+		MisjudgmentPPVolume->Destroy();
+		MisjudgmentPPVolume = nullptr;
+		OpticalInversionMID = nullptr;
+	}
+
 	if (PassButton)   PassButton->OnClicked.RemoveAll(this);
 	if (RejectButton) RejectButton->OnClicked.RemoveAll(this);
 	if (LangToggleButton) LangToggleButton->OnClicked.RemoveAll(this);
@@ -270,6 +292,8 @@ void UInspectionScreen::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		CurrentDollTimeRemaining = FMath::Max(0.0f, CurrentDollTimeRemaining - InDeltaTime);
 		DollTimerText->SetText(FText::AsNumber(FMath::CeilToInt(CurrentDollTimeRemaining)));
 	}
+
+	UpdateOpticalInversion(InDeltaTime);
 }
 
 void UInspectionScreen::OnPassClicked()
@@ -467,30 +491,23 @@ bool UInspectionScreen::CheckShiftTermination()
 
 void UInspectionScreen::ApplyMisjudgmentPressure()
 {
-	UWorld* World = GetWorld();
-	if (!World) return;
-
-	// 第一次调用 spawn 一个全局 PP volume；之后只改它的 settings
-	if (!MisjudgmentPPVolume)
-	{
-		FActorSpawnParameters SP;
-		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		MisjudgmentPPVolume = World->SpawnActor<APostProcessVolume>(
-			FVector::ZeroVector, FRotator::ZeroRotator, SP);
-		if (MisjudgmentPPVolume)
-		{
-			MisjudgmentPPVolume->bUnbound = true;  // 整个世界都受这个 PP 影响
-			MisjudgmentPPVolume->BlendWeight = 1.0f;
-		}
-	}
+	EnsureOpticalInversionPostProcess();
 	if (!MisjudgmentPPVolume) return;
 
-	// 累积压力：vignette / chromatic / desaturation 渐进，5 次封顶
+	// 累积压力：vignette / chromatic / desaturation 渐进，5 次封顶。
+	// PP material 存在时额外推 EdgeOpacityT；不存在时这些内置 PP 仍可作为可见 fallback。
 	const float Pressure = FMath::Clamp(MisjudgmentCount / 5.0f, 0.0f, 1.0f);
+	OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
+	OpticalTargetEdgeOpacityT = ComputeOpticalEdgeOpacityFromMisjudgments();
+	OpticalTargetEdgeRadiusT = FMath::Lerp(0.0f, 0.12f, Pressure);
+	OpticalTargetPulseT = FMath::Lerp(0.05f, 0.35f, Pressure);
+	OpticalTargetInvertT = 0.0f;
+	OpticalTargetBurnoutT = 0.0f;
+	OpticalTargetMechanicalFadeT = 0.0f;
 
 	FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
 	PP.bOverride_VignetteIntensity = true;
-	PP.VignetteIntensity = FMath::Lerp(0.35f, 1.10f, Pressure);
+	PP.VignetteIntensity = FMath::Lerp(0.35f, 1.10f, OpticalTargetEdgeOpacityT);
 
 	PP.bOverride_SceneFringeIntensity = true;
 	PP.SceneFringeIntensity = FMath::Lerp(0.0f, 2.5f, Pressure);
@@ -504,6 +521,180 @@ void UInspectionScreen::ApplyMisjudgmentPressure()
 
 	UE_LOG(LogTemp, Verbose, TEXT("[InspectionScreen] 误判压力 %d/5 → Vignette=%.2f Saturation=%.2f"),
 		MisjudgmentCount, PP.VignetteIntensity, PP.ColorSaturation.X);
+}
+
+void UInspectionScreen::TriggerOpticalInversionSurge(float DurationSec)
+{
+	EnsureOpticalInversionPostProcess();
+	OpticalInversionMode = ECh1OpticalInversionMode::SurgeInversion;
+	OpticalSurgeTotalSec = FMath::Max(0.05f, DurationSec);
+	OpticalSurgeRemainingSec = OpticalSurgeTotalSec;
+
+	OpticalTargetEdgeOpacityT = 1.0f;
+	OpticalTargetEdgeRadiusT = SurgeEdgeRadius;
+	OpticalTargetPulseT = 1.0f;
+	OpticalTargetInvertT = 0.12f;
+	OpticalTargetBurnoutT = 0.0f;
+	OpticalTargetMechanicalFadeT = 0.0f;
+
+	if (MisjudgmentPPVolume)
+	{
+		FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+		PP.bOverride_VignetteIntensity = true;
+		PP.VignetteIntensity = 1.25f;
+		PP.bOverride_SceneFringeIntensity = true;
+		PP.SceneFringeIntensity = 1.5f;
+	}
+}
+
+void UInspectionScreen::PlayTwistOpticalInversionBurnout(float DurationSec)
+{
+	EnsureOpticalInversionPostProcess();
+	OpticalInversionMode = ECh1OpticalInversionMode::TwistBurnout;
+	OpticalBurnoutTotalSec = FMath::Max(0.05f, DurationSec);
+	OpticalBurnoutRemainingSec = OpticalBurnoutTotalSec;
+
+	OpticalTargetEdgeOpacityT = 1.0f;
+	OpticalTargetEdgeRadiusT = FMath::Max(SurgeEdgeRadius, 0.35f);
+	OpticalTargetPulseT = 1.0f;
+	OpticalTargetInvertT = BurnoutInvertPeak;
+	OpticalTargetBurnoutT = 1.0f;
+	OpticalTargetMechanicalFadeT = 0.0f;
+
+	if (MisjudgmentPPVolume)
+	{
+		FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+		PP.bOverride_VignetteIntensity = true;
+		PP.VignetteIntensity = 1.35f;
+		PP.bOverride_SceneFringeIntensity = true;
+		PP.SceneFringeIntensity = 3.0f;
+		PP.bOverride_AutoExposureBias = true;
+		PP.AutoExposureBias = 2.0f;
+	}
+}
+
+void UInspectionScreen::FadeOpticalInversionForMechanicalEye(float DurationSec)
+{
+	EnsureOpticalInversionPostProcess();
+	OpticalFadeTotalSec = FMath::Max(0.05f, DurationSec);
+	OpticalFadeRemainingSec = OpticalFadeTotalSec;
+	OpticalTargetEdgeOpacityT = 0.0f;
+	OpticalTargetEdgeRadiusT = 0.0f;
+	OpticalTargetPulseT = 0.0f;
+	OpticalTargetInvertT = 0.0f;
+	OpticalTargetBurnoutT = 0.0f;
+	OpticalTargetMechanicalFadeT = 1.0f;
+}
+
+void UInspectionScreen::EnsureOpticalInversionPostProcess()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	if (!MisjudgmentPPVolume)
+	{
+		FActorSpawnParameters SP;
+		SP.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		MisjudgmentPPVolume = World->SpawnActor<APostProcessVolume>(
+			FVector::ZeroVector, FRotator::ZeroRotator, SP);
+		if (MisjudgmentPPVolume)
+		{
+			MisjudgmentPPVolume->bUnbound = true;
+			MisjudgmentPPVolume->BlendWeight = 1.0f;
+		}
+	}
+
+	if (MisjudgmentPPVolume && OpticalInversionMaterial && !OpticalInversionMID)
+	{
+		OpticalInversionMID = UMaterialInstanceDynamic::Create(OpticalInversionMaterial, this);
+		if (OpticalInversionMID)
+		{
+			MisjudgmentPPVolume->Settings.WeightedBlendables.Array.Add(
+				FWeightedBlendable(1.0f, OpticalInversionMID));
+			PushOpticalInversionParameters();
+		}
+	}
+}
+
+void UInspectionScreen::UpdateOpticalInversion(float DeltaSeconds)
+{
+	if (!MisjudgmentPPVolume && !OpticalInversionMaterial)
+	{
+		return;
+	}
+
+	EnsureOpticalInversionPostProcess();
+
+	const float InterpSpeed = 6.0f;
+	OpticalEdgeOpacityT = FMath::FInterpTo(OpticalEdgeOpacityT, OpticalTargetEdgeOpacityT, DeltaSeconds, InterpSpeed);
+	OpticalEdgeRadiusT = FMath::FInterpTo(OpticalEdgeRadiusT, OpticalTargetEdgeRadiusT, DeltaSeconds, InterpSpeed);
+	OpticalPulseT = FMath::FInterpTo(OpticalPulseT, OpticalTargetPulseT, DeltaSeconds, InterpSpeed);
+	OpticalInvertT = FMath::FInterpTo(OpticalInvertT, OpticalTargetInvertT, DeltaSeconds, InterpSpeed * 2.0f);
+	OpticalBurnoutT = FMath::FInterpTo(OpticalBurnoutT, OpticalTargetBurnoutT, DeltaSeconds, InterpSpeed * 2.0f);
+	OpticalMechanicalFadeT = FMath::FInterpTo(OpticalMechanicalFadeT, OpticalTargetMechanicalFadeT, DeltaSeconds, InterpSpeed);
+
+	if (OpticalSurgeRemainingSec > 0.0f)
+	{
+		OpticalSurgeRemainingSec -= DeltaSeconds;
+		if (OpticalSurgeRemainingSec <= 0.0f && OpticalInversionMode == ECh1OpticalInversionMode::SurgeInversion)
+		{
+			OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
+			OpticalTargetEdgeOpacityT = ComputeOpticalEdgeOpacityFromMisjudgments();
+			OpticalTargetEdgeRadiusT = 0.0f;
+			OpticalTargetPulseT = 0.15f;
+			OpticalTargetInvertT = 0.0f;
+		}
+	}
+
+	if (OpticalBurnoutRemainingSec > 0.0f)
+	{
+		OpticalBurnoutRemainingSec -= DeltaSeconds;
+		const float BurnoutPhase = 1.0f - FMath::Clamp(OpticalBurnoutRemainingSec / FMath::Max(0.05f, OpticalBurnoutTotalSec), 0.0f, 1.0f);
+		OpticalTargetBurnoutT = FMath::Sin(BurnoutPhase * PI);
+		if (OpticalBurnoutRemainingSec <= 0.0f)
+		{
+			FadeOpticalInversionForMechanicalEye(1.5f);
+		}
+	}
+
+	if (OpticalFadeRemainingSec > 0.0f)
+	{
+		OpticalFadeRemainingSec -= DeltaSeconds;
+		if (MisjudgmentPPVolume)
+		{
+			const float FadeAlpha = FMath::Clamp(OpticalFadeRemainingSec / FMath::Max(0.05f, OpticalFadeTotalSec), 0.0f, 1.0f);
+			FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+			PP.VignetteIntensity = FMath::Lerp(0.35f, 1.35f, FadeAlpha);
+			PP.SceneFringeIntensity = FMath::Lerp(0.0f, 3.0f, FadeAlpha);
+			PP.AutoExposureBias = FMath::Lerp(0.0f, 2.0f, FadeAlpha);
+		}
+	}
+
+	PushOpticalInversionParameters();
+}
+
+void UInspectionScreen::PushOpticalInversionParameters()
+{
+	if (!OpticalInversionMID)
+	{
+		return;
+	}
+
+	OpticalInversionMID->SetScalarParameterValue(TEXT("EdgeOpacityT"), OpticalEdgeOpacityT);
+	OpticalInversionMID->SetScalarParameterValue(TEXT("EdgeRadiusT"), OpticalEdgeRadiusT);
+	OpticalInversionMID->SetScalarParameterValue(TEXT("PulseT"), OpticalPulseT);
+	OpticalInversionMID->SetScalarParameterValue(TEXT("InvertT"), OpticalInvertT);
+	OpticalInversionMID->SetScalarParameterValue(TEXT("BurnoutT"), OpticalBurnoutT);
+	OpticalInversionMID->SetScalarParameterValue(TEXT("MechanicalFadeT"), OpticalMechanicalFadeT);
+	OpticalInversionMID->SetScalarParameterValue(TEXT("ModeT"), static_cast<float>(OpticalInversionMode));
+}
+
+float UInspectionScreen::ComputeOpticalEdgeOpacityFromMisjudgments() const
+{
+	return FMath::Clamp(
+		MisjudgmentCount * OpticalMisjudgmentStep + OpticalBaseOpacity,
+		OpticalBaseOpacity,
+		OpticalMaxOpacity);
 }
 
 void UInspectionScreen::StartFeedback(bool bCorrect)

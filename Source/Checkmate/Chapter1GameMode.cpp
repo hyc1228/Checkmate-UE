@@ -282,6 +282,19 @@ void AChapter1GameMode::RequestTwist()
 	// 音频：钟铃 + 切换 ritual cue
 	UAudioService::PlayCueStatic(this, FName("Ch2.Ritual"));
 
+	// Ch1 optical inversion：先让按扣边缘变实，再进入 EyeFall burnout。
+	if (ActiveInspectionScreen)
+	{
+		ActiveInspectionScreen->TriggerOpticalInversionSurge(1.0f);
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(
+				TwistOpticalBurnoutTimer,
+				FTimerDelegate::CreateUObject(this, &AChapter1GameMode::PlayTwistOpticalBurnout),
+				1.0f, false);
+		}
+	}
+
 	// Fade-to-white：用 PlayerController CameraFade
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
 	{
@@ -300,6 +313,14 @@ void AChapter1GameMode::RequestTwist()
 			TwistHoldTimer,
 			FTimerDelegate::CreateUObject(this, &AChapter1GameMode::OpenCh2Map),
 			TwistFadeSeconds + TwistHoldSeconds, false);
+	}
+}
+
+void AChapter1GameMode::PlayTwistOpticalBurnout()
+{
+	if (ActiveInspectionScreen)
+	{
+		ActiveInspectionScreen->PlayTwistOpticalInversionBurnout(TwistFadeSeconds);
 	}
 }
 

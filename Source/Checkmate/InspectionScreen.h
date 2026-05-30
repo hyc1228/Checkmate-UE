@@ -15,6 +15,15 @@ class ADollDisplay;
 class UCh1LocSubsystem;
 class APostProcessVolume;
 class UMaterialInterface;
+class UMaterialInstanceDynamic;
+
+UENUM(BlueprintType)
+enum class ECh1OpticalInversionMode : uint8
+{
+	AmbientButtonEdge UMETA(DisplayName="Ambient Button Edge"),
+	SurgeInversion UMETA(DisplayName="Surge Inversion"),
+	TwistBurnout UMETA(DisplayName="Twist Burnout")
+};
 
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
@@ -91,6 +100,18 @@ public:
 	/** ADollDisplay 在印章砸到娃娃的瞬间调 —— 触发强震 + 冲击。 */
 	void PlayStampImpactFeedback();
 
+	/** Twist 前的视野反转 surge：按扣边缘变实，供 GameMode / Sequencer 事件调用。 */
+	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
+	void TriggerOpticalInversionSurge(float DurationSec = 1.0f);
+
+	/** Twist EyeFall 阶段：爆白 + 短反相 + 色散。 */
+	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
+	void PlayTwistOpticalInversionBurnout(float DurationSec = 1.0f);
+
+	/** MechanicalEyed 后把按扣覆盖层淡出。 */
+	UFUNCTION(BlueprintCallable, Category="Inspection|Optical Inversion")
+	void FadeOpticalInversionForMechanicalEye(float DurationSec = 1.5f);
+
 	/** 班次结束时广播。 */
 	UPROPERTY(BlueprintAssignable, Category="Inspection")
 	FOnShiftCompleted OnShiftCompleted;
@@ -145,6 +166,33 @@ public:
 	/** 震屏时长（秒）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback", meta=(ClampMin="0.05"))
 	float ShakeDurationSec = 0.30f;
+
+	// ── Ch1 Optical Inversion Layer / PP_SubliminalEdge ─────────────────────
+
+	/** 可选：全屏后处理材质 PP_SubliminalEdge。未设置时仍使用内置 PP fallback。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Optical Inversion")
+	UMaterialInterface* OpticalInversionMaterial = nullptr;
+
+	/** EdgeOpacity(m)=clamp(m*Step+Base, Base, Max)。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Optical Inversion", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float OpticalBaseOpacity = 0.05f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Optical Inversion", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float OpticalMisjudgmentStep = 0.15f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Optical Inversion", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float OpticalMaxOpacity = 0.60f;
+
+	/** Surge 时按扣覆盖向屏幕中心推进的强度。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Optical Inversion", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float SurgeEdgeRadius = 0.25f;
+
+	/** TwistBurnout 峰值短反相强度；材质内应 clamp，避免廉价长时间负片化。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Optical Inversion", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float BurnoutInvertPeak = 0.40f;
+
+	UPROPERTY(BlueprintReadOnly, Category="Inspection|Optical Inversion")
+	ECh1OpticalInversionMode OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -224,6 +272,30 @@ private:
 	UPROPERTY()
 	APostProcessVolume* MisjudgmentPPVolume = nullptr;
 
+	UPROPERTY()
+	UMaterialInstanceDynamic* OpticalInversionMID = nullptr;
+
+	float OpticalEdgeOpacityT = 0.05f;
+	float OpticalEdgeRadiusT = 0.0f;
+	float OpticalPulseT = 0.0f;
+	float OpticalInvertT = 0.0f;
+	float OpticalBurnoutT = 0.0f;
+	float OpticalMechanicalFadeT = 0.0f;
+
+	float OpticalTargetEdgeOpacityT = 0.05f;
+	float OpticalTargetEdgeRadiusT = 0.0f;
+	float OpticalTargetPulseT = 0.0f;
+	float OpticalTargetInvertT = 0.0f;
+	float OpticalTargetBurnoutT = 0.0f;
+	float OpticalTargetMechanicalFadeT = 0.0f;
+
+	float OpticalSurgeRemainingSec = 0.0f;
+	float OpticalSurgeTotalSec = 0.0f;
+	float OpticalBurnoutRemainingSec = 0.0f;
+	float OpticalBurnoutTotalSec = 0.0f;
+	float OpticalFadeRemainingSec = 0.0f;
+	float OpticalFadeTotalSec = 0.0f;
+
 	/** 桌面 3D 纸卡 actors（diegetic 标准卡，让玩家在 3D 检验时看见自己选的判据）。 */
 	UPROPERTY()
 	TArray<AActor*> DeskCardActors;
@@ -268,6 +340,12 @@ private:
 
 	/** 误判累积导致镜头 vignette↑/saturation↓（论点：判错让世界变冷）。 */
 	void ApplyMisjudgmentPressure();
+
+	/** 创建/刷新全局 Ch1 optical inversion PP volume。 */
+	void EnsureOpticalInversionPostProcess();
+	void UpdateOpticalInversion(float DeltaSeconds);
+	void PushOpticalInversionParameters();
+	float ComputeOpticalEdgeOpacityFromMisjudgments() const;
 
 	/** Spawn/refresh 桌面 K 张 3D 纸卡（diegetic 标准）。 */
 	void SpawnDeskCards();
