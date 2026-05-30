@@ -1,0 +1,366 @@
+:root {
+  --bg: #141414;
+  --panel: #1f2023;
+  --panel-2: #292a2d;
+  --text: #f0ece4;
+  --muted: #aaa39a;
+  --line: #3a3936;
+  --accent: #d8b46a;
+  --good: #84c78a;
+  --warn: #d2a14f;
+  --bad: #d56b67;
+  --info: #7aa6c9;
+  --focus: #cfc2a3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+.importLabel,
+select,
+input[type="search"],
+input[type="text"],
+textarea {
+  border: 1px solid var(--line);
+  background: #18191b;
+  color: var(--text);
+}
+
+button,
+.importLabel {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:hover,
+.importLabel:hover {
+  border-color: var(--accent);
+}
+
+code {
+  color: var(--accent);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(20, 20, 20, 0.96);
+  backdrop-filter: blur(8px);
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.topbar p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.importLabel {
+  display: inline-flex;
+  align-items: center;
+}
+
+.importLabel input {
+  display: none;
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 1px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.metric {
+  min-height: 78px;
+  padding: 14px 16px;
+  background: var(--panel);
+}
+
+.metric span {
+  display: block;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.metric label {
+  display: block;
+  color: var(--muted);
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 180px 180px 180px;
+  gap: 10px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.controls input,
+.controls select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 6px;
+}
+
+main {
+  padding: 18px 24px 160px;
+}
+
+.cueList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 14px;
+}
+
+.cueCard {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.cueHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.cueKey {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.cueMeta {
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+  align-content: flex-start;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  background: #151618;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.badge.good {
+  border-color: color-mix(in srgb, var(--good), #000 35%);
+  color: var(--good);
+}
+
+.badge.warn {
+  border-color: color-mix(in srgb, var(--warn), #000 35%);
+  color: var(--warn);
+}
+
+.badge.bad {
+  border-color: color-mix(in srgb, var(--bad), #000 35%);
+  color: var(--bad);
+}
+
+.badge.info {
+  border-color: color-mix(in srgb, var(--info), #000 35%);
+  color: var(--info);
+}
+
+.cueBody {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 14px;
+}
+
+.field label,
+.playerTitle {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field p {
+  margin: 0;
+}
+
+.players {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.playerBlock {
+  min-width: 0;
+}
+
+audio {
+  width: 100%;
+  height: 34px;
+}
+
+.candidateInput {
+  width: 100%;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
+.candidateName {
+  margin-top: 4px;
+  color: var(--muted);
+  min-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.reviewRow {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 10px;
+  padding: 0 14px 12px;
+}
+
+.reviewRow select,
+.reviewRow input,
+textarea {
+  width: 100%;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+textarea {
+  display: block;
+  margin: 0 14px 14px;
+  width: calc(100% - 28px);
+  min-height: 74px;
+  resize: vertical;
+}
+
+.sidePanel {
+  position: fixed;
+  left: 24px;
+  right: 24px;
+  bottom: 18px;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(31, 32, 35, 0.96);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.sidePanel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.sidePanel ol,
+.sidePanel p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.sidePanel ol {
+  padding-left: 18px;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 920px) {
+  .topbar,
+  .players,
+  .cueBody,
+  .reviewRow,
+  .sidePanel {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    display: grid;
+  }
+
+  .statusGrid,
+  .controls,
+  .cueList {
+    grid-template-columns: 1fr;
+  }
+
+  .cueList {
+    display: block;
+  }
+
+  .cueCard {
+    margin-bottom: 12px;
+  }
+
+  .sidePanel {
+    position: static;
+    margin: 0 24px 24px;
+  }
+
+  main {
+    padding-bottom: 24px;
+  }
+}

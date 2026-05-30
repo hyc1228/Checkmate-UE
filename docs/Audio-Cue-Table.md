@@ -9,6 +9,8 @@
 > ```
 >
 > **路由**：FMOD event 优先 → 原生 SoundWave 兜底（见 `Source/Checkmate/AudioService.cpp`）
+>
+> **试听板**：`docs/audio-audition/index.html` 可以直接打开，或在项目根目录运行 `python3 -m http.server 8765` 后访问 `http://127.0.0.1:8765/docs/audio-audition/`。用于批量预听、上传候选音频、标记 Approved / Replace / Reject，并导出 review JSON。
 
 ---
 

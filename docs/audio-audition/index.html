@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checkmate Audio Audition Board</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Checkmate Audio Audition Board</h1>
+      <p>本地预听、筛选、标记、替换候选记录。最终替换路径统一指向 <code>Content/Audio/Placeholder/</code>。</p>
+    </div>
+    <div class="actions">
+      <button id="playVisibleBtn" type="button">Play Visible</button>
+      <button id="stopBtn" type="button">Stop</button>
+      <button id="exportBtn" type="button">Export JSON</button>
+      <label class="importLabel">
+        Import JSON
+        <input id="importInput" type="file" accept="application/json">
+      </label>
+    </div>
+  </header>
+
+  <section class="statusGrid" aria-label="Audio status overview">
+    <div class="metric">
+      <span id="metricTotal">0</span>
+      <label>Total Cues</label>
+    </div>
+    <div class="metric">
+      <span id="metricHooked">0</span>
+      <label>Code Hooked</label>
+    </div>
+    <div class="metric">
+      <span id="metricPlaceholder">0</span>
+      <label>Placeholder Ready</label>
+    </div>
+    <div class="metric">
+      <span id="metricNeeds">0</span>
+      <label>Needs Replacement</label>
+    </div>
+    <div class="metric">
+      <span id="metricApproved">0</span>
+      <label>Approved</label>
+    </div>
+  </section>
+
+  <section class="controls" aria-label="Filters">
+    <input id="searchInput" type="search" placeholder="Search cue, scene, target, filename">
+    <select id="categoryFilter" aria-label="Category filter">
+      <option value="all">All Categories</option>
+    </select>
+    <select id="statusFilter" aria-label="Status filter">
+      <option value="all">All Status</option>
+      <option value="hooked">Code Hooked</option>
+      <option value="not-hooked">Not Hooked</option>
+      <option value="has-placeholder">Has Placeholder</option>
+      <option value="missing-placeholder">Missing Placeholder</option>
+      <option value="needs-replacement">Needs Replacement</option>
+      <option value="approved">Approved</option>
+    </select>
+    <select id="decisionFilter" aria-label="Decision filter">
+      <option value="all">All Decisions</option>
+      <option value="untested">Untested</option>
+      <option value="approved">Approved</option>
+      <option value="candidate">Candidate</option>
+      <option value="replace">Replace</option>
+      <option value="reject">Reject</option>
+    </select>
+  </section>
+
+  <main>
+    <div id="cueList" class="cueList"></div>
+  </main>
+
+  <aside class="sidePanel">
+    <h2>Replacement Workflow</h2>
+    <ol>
+      <li>在每个 cue 上点击当前占位音预听。</li>
+      <li>用 Upload Candidate 选择你找到的新音频，直接在网页里对比试听。</li>
+      <li>标记 Approved / Candidate / Replace / Reject，并写备注。</li>
+      <li>如果决定替换，把文件改名为目标文件名，覆盖到 <code>Content/Audio/Placeholder/</code>。</li>
+      <li>UE 里运行 <code>Content/Python/import_audio.py</code> 和 <code>bind_audio_cues.py</code>。</li>
+    </ol>
+    <p>网页不会直接写入项目文件。它只负责试听和记录决策，避免浏览器权限问题。</p>
+  </aside>
+
+  <template id="cueTemplate">
+    <article class="cueCard">
+      <div class="cueHeader">
+        <div>
+          <div class="cueKey"></div>
+          <div class="cueMeta"></div>
+        </div>
+        <div class="badges"></div>
+      </div>
+
+      <div class="cueBody">
+        <div class="field">
+          <label>Scene / Trigger</label>
+          <p class="trigger"></p>
+        </div>
+        <div class="field">
+          <label>Design Target</label>
+          <p class="target"></p>
+        </div>
+        <div class="field">
+          <label>Current Placeholder</label>
+          <p class="placeholder"></p>
+        </div>
+        <div class="field">
+          <label>FMOD Event</label>
+          <p class="fmod"></p>
+        </div>
+      </div>
+
+      <div class="players">
+        <div class="playerBlock">
+          <div class="playerTitle">Current</div>
+          <audio class="currentAudio" controls preload="none"></audio>
+        </div>
+        <div class="playerBlock">
+          <div class="playerTitle">Uploaded Candidate</div>
+          <input class="candidateInput" type="file" accept="audio/*">
+          <audio class="candidateAudio" controls preload="none"></audio>
+          <div class="candidateName"></div>
+        </div>
+      </div>
+
+      <div class="reviewRow">
+        <select class="decisionSelect" aria-label="Decision">
+          <option value="untested">Untested</option>
+          <option value="approved">Approved</option>
+          <option value="candidate">Candidate</option>
+          <option value="replace">Replace</option>
+          <option value="reject">Reject</option>
+        </select>
+        <input class="replacementInput" type="text" placeholder="Replacement source / URL / local filename">
+      </div>
+      <textarea class="notesInput" rows="3" placeholder="Notes: what works, what fails, edit ideas, FMOD treatment"></textarea>
+    </article>
+  </template>
+
+  <script src="./app.js"></script>
+</body>
+</html>
