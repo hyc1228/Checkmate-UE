@@ -72,6 +72,7 @@ void ACh2Pawn::SetEyeStyle(EButtonEyeStyle NewStyle)
 void ACh2Pawn::SetMode(ECh2Mode NewMode)
 {
 	CurrentMode = NewMode;
+	ModePulseElapsed = 0.0f;
 	if (BodyMesh)
 	{
 		const FVector Tint = (NewMode == ECh2Mode::Clown)
@@ -195,7 +196,14 @@ bool ACh2Pawn::TryMoveTo(FIntPoint TargetCell)
 	if (bMoving) return false;  // 当前正在 lerp 中，吃掉新点击
 
 	const TArray<FIntPoint> Valid = GetValidMoves();
-	if (!Valid.Contains(TargetCell)) return false;
+	if (!Valid.Contains(TargetCell))
+	{
+		if (ACh2GameMode* GM = GetGM())
+		{
+			GM->NotifyInvalidMove(TargetCell);
+		}
+		return false;
+	}
 
 	PendingFromCell = GetCurrentCell();
 	PendingTargetCell = TargetCell;
@@ -248,13 +256,43 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 		const float Eased = FMath::InterpEaseOut(0.0f, 1.0f, T, 2.0f);
 		// 加一点 hop 弧线（中间略抬起）
 		FVector L = FMath::Lerp(MoveStartLoc, MoveEndLoc, Eased);
-		L.Z += FMath::Sin(T * PI) * 30.0f;
+		const float Arc = FMath::Sin(T * PI);
+		const float HopHeight = bPendingClownMove ? ClownHopHeight : MoveHopHeight;
+		L.Z += Arc * HopHeight;
 		SetActorLocation(L);
+
+		if (BodyMesh)
+		{
+			const FVector MoveDir = (MoveEndLoc - MoveStartLoc).GetSafeNormal2D();
+			const float Squash = Arc * MoveSquashAmount;
+			BodyMesh->SetRelativeScale3D(FVector(
+				0.6f + Squash * 0.35f,
+				0.6f + Squash * 0.35f,
+				1.0f - Squash));
+			BodyMesh->SetRelativeRotation(FRotator(
+				-MoveDir.X * MoveLeanDegrees * Arc,
+				0.0f,
+				MoveDir.Y * MoveLeanDegrees * Arc));
+		}
+		if (EyeMarker)
+		{
+			const float EyePulse = 1.0f + Arc * 0.35f;
+			EyeMarker->SetRelativeScale3D(FVector(0.25f * EyePulse));
+		}
 
 		if (T >= 1.0f)
 		{
 			bMoving = false;
 			SetActorLocation(MoveEndLoc);
+			if (BodyMesh)
+			{
+				BodyMesh->SetRelativeScale3D(FVector(0.6f, 0.6f, 1.0f));
+				BodyMesh->SetRelativeRotation(FRotator::ZeroRotator);
+			}
+			if (EyeMarker)
+			{
+				EyeMarker->SetRelativeScale3D(FVector(0.25f));
+			}
 			if (ACh2GameMode* GM = GetGM())
 			{
 				GM->NotifyPawnMoved(PendingFromCell, PendingTargetCell, bPendingClownMove);
@@ -268,12 +306,23 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 	{
 		static float IdleElapsed = 0.0f;
 		IdleElapsed += DeltaSeconds;
+		ModePulseElapsed += DeltaSeconds;
 		const float Bob = FMath::Sin(IdleElapsed * 2.5f) * 4.0f;
+		const float ModePulse = ModePulseElapsed < 0.35f
+			? FMath::Sin((ModePulseElapsed / 0.35f) * PI) * 0.18f
+			: 0.0f;
 		if (BodyMesh)
 		{
 			FVector RelLoc = BodyMesh->GetRelativeLocation();
 			RelLoc.Z = Bob;
 			BodyMesh->SetRelativeLocation(RelLoc);
+			BodyMesh->SetRelativeScale3D(FVector(0.6f + ModePulse, 0.6f + ModePulse, 1.0f + ModePulse * 0.5f));
+			BodyMesh->SetRelativeRotation(FRotator::ZeroRotator);
+		}
+		if (EyeMarker)
+		{
+			const float EyePulse = 1.0f + ModePulse * 1.2f + FMath::Max(0.0f, FMath::Sin(IdleElapsed * 5.0f)) * 0.06f;
+			EyeMarker->SetRelativeScale3D(FVector(0.25f * EyePulse));
 		}
 	}
 

@@ -92,6 +92,18 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0.05"))
 	float MoveDuration = 0.22f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0"))
+	float MoveHopHeight = 30.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0"))
+	float ClownHopHeight = 72.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0"))
+	float MoveLeanDegrees = 10.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0", ClampMax="0.5"))
+	float MoveSquashAmount = 0.12f;
+
 	/** 按扣眼材质（spec：芭蕾模式 = 按扣眼 / 珍珠暖白）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|EyeMotif")
 	UMaterialInterface* EyeMaterial_Pearl = nullptr;
@@ -127,4 +139,5 @@ protected:
 	FIntPoint PendingTargetCell = FIntPoint::ZeroValue;
 	bool bPendingClownMove = false;
 	FIntPoint PendingFromCell = FIntPoint::ZeroValue;
+	float ModePulseElapsed = 99.0f;
 };

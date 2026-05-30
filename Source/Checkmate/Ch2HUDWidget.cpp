@@ -39,6 +39,26 @@ void UCh2HUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 			if (RitualText)  RitualText->SetVisibility(ESlateVisibility::Hidden);
 		}
 	}
+
+	ModePulseElapsed += InDeltaTime;
+	HintPulseElapsed += InDeltaTime;
+
+	if (ModeText)
+	{
+		const float T = FMath::Clamp(ModePulseElapsed / 0.28f, 0.0f, 1.0f);
+		const float Pulse = FMath::Sin(T * PI);
+		FWidgetTransform Transform;
+		Transform.Scale = FVector2D(1.0f + Pulse * 0.08f, 1.0f + Pulse * 0.08f);
+		Transform.Translation = FVector2D(0.0f, -4.0f * Pulse);
+		ModeText->SetRenderTransform(Transform);
+		ModeText->SetRenderOpacity(0.82f + Pulse * 0.18f);
+	}
+	if (HintText)
+	{
+		const float T = FMath::Clamp(HintPulseElapsed / 0.32f, 0.0f, 1.0f);
+		const float Pulse = FMath::Sin(T * PI);
+		HintText->SetRenderOpacity(0.66f + Pulse * 0.34f);
+	}
 }
 
 void UCh2HUDWidget::PlayPickupRitual()
@@ -77,14 +97,32 @@ void UCh2HUDWidget::SetMoveCounter(int32 Current, int32 Budget)
 	MoveCounterText->SetText(FText::FromString(Msg));
 }
 
+void UCh2HUDWidget::SetMoveCounterVisible(bool bVisible)
+{
+	if (MoveCounterText)
+	{
+		MoveCounterText->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+}
+
 void UCh2HUDWidget::SetMode(ECh2Mode NewMode)
 {
 	if (!ModeText) return;
+	ModePulseElapsed = 0.0f;
+	const FString JuicyModeName = (NewMode == ECh2Mode::Clown) ? TEXT("CLOWN / L-JUMP") : TEXT("BALLET / SLIDE");
+	ModeText->SetText(FText::FromString(JuicyModeName));
+	ModeText->SetColorAndOpacity(FSlateColor(NewMode == ECh2Mode::Clown
+		? FLinearColor(1.0f, 0.78f, 0.22f, 1.0f)
+		: FLinearColor(0.72f, 0.94f, 1.0f, 1.0f)));
 	const FString Name = (NewMode == ECh2Mode::Clown) ? TEXT("小丑 (knight L-跳)") : TEXT("芭蕾 (直线滑到墙)");
 	ModeText->SetText(FText::FromString(FString::Printf(TEXT("当前角色：%s"), *Name)));
 }
 
 void UCh2HUDWidget::SetHintMessage(const FString& Hint)
 {
-	if (HintText) HintText->SetText(FText::FromString(Hint));
+	if (HintText)
+	{
+		HintPulseElapsed = 0.0f;
+		HintText->SetText(FText::FromString(Hint));
+	}
 }

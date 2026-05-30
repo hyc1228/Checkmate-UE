@@ -29,6 +29,13 @@ class UUniformGridPanel;
 class UButton;
 class UTextBlock;
 
+UENUM(BlueprintType)
+enum class ECh2EditorPVPreset : uint8
+{
+	PVGoldPathRoom1 UMETA(DisplayName="PV Gold Path Room 1"),
+	EmptySandbox UMETA(DisplayName="Empty Sandbox"),
+};
+
 /**
  * Ch2 关卡编辑器（Editor Utility Widget）。
  *
@@ -66,6 +73,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch2 Editor")
 	void SaveToAsset();
 
+	UFUNCTION(BlueprintCallable, Category="Ch2 Editor|PV")
+	void ApplyPVPreset(ECh2EditorPVPreset Preset);
+
+	UFUNCTION(BlueprintCallable, Category="Ch2 Editor|PV")
+	void ApplyPVGoldPathRoom1Preset();
+
+	UFUNCTION(BlueprintCallable, Category="Ch2 Editor|PV")
+	void ApplyEmptySandboxPreset();
+
+	UFUNCTION(BlueprintCallable, Category="Ch2 Editor|PV")
+	void ApplyPVRecordingDefaults();
+
+	UFUNCTION(BlueprintCallable, Category="Ch2 Editor|PV")
+	FString ValidateTargetAsset();
+
 protected:
 	virtual void NativeConstruct() override;
 
@@ -96,6 +118,18 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UButton* SaveButton = nullptr;
 
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UButton* PresetBtn_PVGoldPath = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UButton* PresetBtn_Clear = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UButton* PresetBtn_PVDefaults = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UButton* PresetBtn_Validate = nullptr;
+
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UTextBlock* StatusText = nullptr;
 
@@ -107,6 +141,10 @@ protected:
 	UFUNCTION() void OnBrushStartClicked();
 	UFUNCTION() void OnBrushWeddingWreckageClicked();
 	UFUNCTION() void OnSaveClicked();
+	UFUNCTION() void OnPresetPVGoldPathClicked();
+	UFUNCTION() void OnPresetClearClicked();
+	UFUNCTION() void OnPresetPVDefaultsClicked();
+	UFUNCTION() void OnPresetValidateClicked();
 
 private:
 	ECh2CellType CurrentBrush = ECh2CellType::Wall;
@@ -126,6 +164,9 @@ private:
 	void RefreshCellVisual(FIntPoint Cell);
 	void OnCellClicked_Internal(FIntPoint Cell);
 	void SetBrush(ECh2CellType NewBrush);
+	void SetStatus(const FString& Message);
+	void ApplyStandardPVGridSettings();
+	int32 CountCellsOfType(ECh2CellType Type) const;
 
 	static FLinearColor ColorForType(ECh2CellType Type);
 	static FString LabelForType(ECh2CellType Type);

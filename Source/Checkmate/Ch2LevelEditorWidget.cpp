@@ -22,6 +22,10 @@ void UCh2LevelEditorWidget::NativeConstruct()
 	if (BrushBtn_Start)        BrushBtn_Start->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnBrushStartClicked);
 	if (BrushBtn_WeddingWreckage) BrushBtn_WeddingWreckage->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnBrushWeddingWreckageClicked);
 	if (SaveButton)            SaveButton->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnSaveClicked);
+	if (PresetBtn_PVGoldPath)  PresetBtn_PVGoldPath->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnPresetPVGoldPathClicked);
+	if (PresetBtn_Clear)       PresetBtn_Clear->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnPresetClearClicked);
+	if (PresetBtn_PVDefaults)  PresetBtn_PVDefaults->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnPresetPVDefaultsClicked);
+	if (PresetBtn_Validate)    PresetBtn_Validate->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnPresetValidateClicked);
 
 	SetBrush(ECh2CellType::Wall);
 	RebuildGrid();
@@ -191,6 +195,224 @@ void UCh2LevelEditorWidget::SaveToAsset()
 			bOk ? TEXT("✓") : TEXT("✗"),
 			*TargetAsset->GetName(), TargetAsset->Cells.Num())));
 	}
+}
+
+void UCh2LevelEditorWidget::SetStatus(const FString& Message)
+{
+	if (StatusText)
+	{
+		StatusText->SetText(FText::FromString(Message));
+	}
+}
+
+void UCh2LevelEditorWidget::ApplyPVPreset(ECh2EditorPVPreset Preset)
+{
+	switch (Preset)
+	{
+	case ECh2EditorPVPreset::PVGoldPathRoom1:
+		ApplyPVGoldPathRoom1Preset();
+		break;
+	case ECh2EditorPVPreset::EmptySandbox:
+		ApplyEmptySandboxPreset();
+		break;
+	default:
+		break;
+	}
+}
+
+void UCh2LevelEditorWidget::ApplyStandardPVGridSettings()
+{
+	if (!TargetAsset) return;
+	TargetAsset->GridWidth = 8;
+	TargetAsset->GridHeight = 8;
+	TargetAsset->CellSize = 200.0f;
+}
+
+void UCh2LevelEditorWidget::ApplyPVRecordingDefaults()
+{
+	if (!TargetAsset)
+	{
+		SetStatus(TEXT("PV defaults failed: TargetAsset is empty."));
+		return;
+	}
+
+	TargetAsset->Modify();
+	ApplyStandardPVGridSettings();
+	TargetAsset->MoveBudget = 99;
+	TargetAsset->OptimalMoveCount = 3;
+	TargetAsset->MarkPackageDirty();
+
+	RebuildGrid();
+	SetStatus(TEXT("PV defaults applied: 8x8, CellSize=200, MoveBudget=99, OptimalMoveCount=3. Save when ready."));
+}
+
+void UCh2LevelEditorWidget::ApplyPVGoldPathRoom1Preset()
+{
+	if (!TargetAsset)
+	{
+		SetStatus(TEXT("PV gold path preset failed: TargetAsset is empty."));
+		return;
+	}
+
+	TargetAsset->Modify();
+	ApplyStandardPVGridSettings();
+	TargetAsset->MoveBudget = 99;
+	TargetAsset->OptimalMoveCount = 3;
+	TargetAsset->Cells.Empty();
+
+	TargetAsset->Cells.Add(FIntPoint(5, 7), ECh2CellType::Start);
+	TargetAsset->Cells.Add(FIntPoint(3, 4), ECh2CellType::WeddingWreckage);
+	TargetAsset->Cells.Add(FIntPoint(4, 4), ECh2CellType::WeddingWreckage);
+	TargetAsset->Cells.Add(FIntPoint(5, 4), ECh2CellType::ClownPickup);
+	TargetAsset->Cells.Add(FIntPoint(5, 3), ECh2CellType::Destructible);
+	TargetAsset->Cells.Add(FIntPoint(4, 1), ECh2CellType::Exit);
+	TargetAsset->MarkPackageDirty();
+
+	RebuildGrid();
+	SetStatus(TEXT("PV gold path ready: Start(5,7) -> Pickup(5,4) -> Clown target(3,3) -> Exit(4,1). Destructible at (5,3). Save when ready."));
+}
+
+void UCh2LevelEditorWidget::ApplyEmptySandboxPreset()
+{
+	if (!TargetAsset)
+	{
+		SetStatus(TEXT("Clear preset failed: TargetAsset is empty."));
+		return;
+	}
+
+	TargetAsset->Modify();
+	ApplyStandardPVGridSettings();
+	TargetAsset->MoveBudget = 0;
+	TargetAsset->OptimalMoveCount = 0;
+	TargetAsset->Cells.Empty();
+	TargetAsset->Cells.Add(FIntPoint(1, 1), ECh2CellType::Start);
+	TargetAsset->Cells.Add(FIntPoint(6, 6), ECh2CellType::Exit);
+	TargetAsset->MarkPackageDirty();
+
+	RebuildGrid();
+	SetStatus(TEXT("Empty sandbox ready: Start(1,1), Exit(6,6), no move budget. Save when ready."));
+}
+
+int32 UCh2LevelEditorWidget::CountCellsOfType(ECh2CellType Type) const
+{
+	if (!TargetAsset) return 0;
+	int32 Count = 0;
+	for (const TPair<FIntPoint, ECh2CellType>& P : TargetAsset->Cells)
+	{
+		if (P.Value == Type)
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+FString UCh2LevelEditorWidget::ValidateTargetAsset()
+{
+	if (!TargetAsset)
+	{
+		const FString Message = TEXT("Validation failed: TargetAsset is empty.");
+		SetStatus(Message);
+		return Message;
+	}
+
+	TArray<FString> Lines;
+	bool bHasError = false;
+	bool bGoldPathReady = true;
+
+	if (TargetAsset->GridWidth != 8 || TargetAsset->GridHeight != 8)
+	{
+		bHasError = true;
+		bGoldPathReady = false;
+		Lines.Add(FString::Printf(TEXT("ERROR: PV grid should be 8x8, current=%dx%d."), TargetAsset->GridWidth, TargetAsset->GridHeight));
+	}
+	if (!FMath::IsNearlyEqual(TargetAsset->CellSize, 200.0f))
+	{
+		bGoldPathReady = false;
+		Lines.Add(FString::Printf(TEXT("WARN: PV CellSize recommends 200, current=%.1f."), TargetAsset->CellSize));
+	}
+	if (TargetAsset->MoveBudget != 99)
+	{
+		bGoldPathReady = false;
+		Lines.Add(FString::Printf(TEXT("WARN: PV recording MoveBudget recommends 99, current=%d."), TargetAsset->MoveBudget));
+	}
+
+	const int32 StartCount = CountCellsOfType(ECh2CellType::Start);
+	const int32 ExitCount = CountCellsOfType(ECh2CellType::Exit);
+	const int32 PickupCount = CountCellsOfType(ECh2CellType::ClownPickup);
+	const int32 DestructibleCount = CountCellsOfType(ECh2CellType::Destructible);
+	const int32 WreckageCount = CountCellsOfType(ECh2CellType::WeddingWreckage);
+
+	if (StartCount != 1) { bHasError = true; Lines.Add(FString::Printf(TEXT("ERROR: expected 1 Start, found %d."), StartCount)); }
+	if (ExitCount != 1) { bHasError = true; Lines.Add(FString::Printf(TEXT("ERROR: expected 1 Exit, found %d."), ExitCount)); }
+	if (PickupCount < 1) { bHasError = true; Lines.Add(TEXT("ERROR: expected at least 1 ClownPickup.")); }
+	if (DestructibleCount < 1) { bHasError = true; Lines.Add(TEXT("ERROR: expected at least 1 Destructible.")); }
+	if (WreckageCount < 2) { bGoldPathReady = false; Lines.Add(FString::Printf(TEXT("WARN: PV bell beat expects 2 WeddingWreckage cells, found %d."), WreckageCount)); }
+
+	for (const TPair<FIntPoint, ECh2CellType>& P : TargetAsset->Cells)
+	{
+		const FIntPoint Cell = P.Key;
+		const bool bInBounds = Cell.X >= 0 && Cell.X < TargetAsset->GridWidth
+			&& Cell.Y >= 0 && Cell.Y < TargetAsset->GridHeight;
+		if (!bInBounds)
+		{
+			bHasError = true;
+			bGoldPathReady = false;
+			Lines.Add(FString::Printf(TEXT("ERROR: cell (%d,%d) is out of bounds."), Cell.X, Cell.Y));
+		}
+	}
+
+	const TPair<FIntPoint, ECh2CellType> GoldCells[] =
+	{
+		TPair<FIntPoint, ECh2CellType>(FIntPoint(5, 7), ECh2CellType::Start),
+		TPair<FIntPoint, ECh2CellType>(FIntPoint(3, 4), ECh2CellType::WeddingWreckage),
+		TPair<FIntPoint, ECh2CellType>(FIntPoint(4, 4), ECh2CellType::WeddingWreckage),
+		TPair<FIntPoint, ECh2CellType>(FIntPoint(5, 4), ECh2CellType::ClownPickup),
+		TPair<FIntPoint, ECh2CellType>(FIntPoint(5, 3), ECh2CellType::Destructible),
+		TPair<FIntPoint, ECh2CellType>(FIntPoint(4, 1), ECh2CellType::Exit),
+	};
+	for (const TPair<FIntPoint, ECh2CellType>& Expected : GoldCells)
+	{
+		if (TargetAsset->GetCellType(Expected.Key) != Expected.Value)
+		{
+			bGoldPathReady = false;
+			Lines.Add(FString::Printf(TEXT("WARN: gold path cell (%d,%d) should be %s."),
+				Expected.Key.X, Expected.Key.Y, *LabelForType(Expected.Value)));
+		}
+	}
+
+	if (Lines.Num() == 0)
+	{
+		Lines.Add(TEXT("OK: Ch2 level validates cleanly."));
+	}
+	Lines.Insert(FString::Printf(TEXT("PV_GOLD_PATH_READY=%s Errors=%s Cells=%d"),
+		bGoldPathReady && !bHasError ? TEXT("true") : TEXT("false"),
+		bHasError ? TEXT("true") : TEXT("false"),
+		TargetAsset->Cells.Num()), 0);
+
+	const FString Result = FString::Join(Lines, TEXT("\n"));
+	SetStatus(Result);
+	return Result;
+}
+
+void UCh2LevelEditorWidget::OnPresetPVGoldPathClicked()
+{
+	ApplyPVGoldPathRoom1Preset();
+}
+
+void UCh2LevelEditorWidget::OnPresetClearClicked()
+{
+	ApplyEmptySandboxPreset();
+}
+
+void UCh2LevelEditorWidget::OnPresetPVDefaultsClicked()
+{
+	ApplyPVRecordingDefaults();
+}
+
+void UCh2LevelEditorWidget::OnPresetValidateClicked()
+{
+	ValidateTargetAsset();
 }
 
 FLinearColor UCh2LevelEditorWidget::ColorForType(ECh2CellType Type)

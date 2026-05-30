@@ -38,6 +38,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch2 HUD")
 	void SetMoveCounter(int32 Current, int32 Budget);
 
+	UFUNCTION(BlueprintCallable, Category="Ch2 HUD")
+	void SetMoveCounterVisible(bool bVisible);
+
 	/** Ritual fade 总时长。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2 HUD")
 	float RitualDuration = 0.7f;
@@ -68,4 +71,6 @@ protected:
 private:
 	float RitualElapsed = 0.0f;
 	bool bRitualActive = false;
+	float ModePulseElapsed = 99.0f;
+	float HintPulseElapsed = 99.0f;
 };

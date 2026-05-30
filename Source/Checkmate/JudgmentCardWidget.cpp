@@ -16,7 +16,7 @@ namespace
 {
 	constexpr int32 HoverZOrderBoost = 1000;
 
-	float EaseOutCubic(float T)
+	float CardEaseOutCubic(float T)
 	{
 		const float Clamped = FMath::Clamp(T, 0.0f, 1.0f);
 		return 1.0f - FMath::Pow(1.0f - Clamped, 3.0f);
@@ -352,7 +352,7 @@ void UJudgmentCardWidget::TickOutro(float InDeltaTime)
 	OutroElapsed = FMath::Min(OutroElapsed + InDeltaTime, OutroDuration);
 	const float T = OutroElapsed / OutroDuration;
 	const float MoveT = EaseOutBack(T);
-	const float FadeT = EaseOutCubic(T);
+	const float FadeT = CardEaseOutCubic(T);
 
 	CurrentOutroOffset = FMath::Lerp(OutroStartOffset, OutroTargetOffset, MoveT);
 	CurrentOutroAngleAdd = FMath::Lerp(OutroStartAngleAdd, OutroTargetAngleAdd, MoveT);

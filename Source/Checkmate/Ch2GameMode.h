@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "Ch2BeatPanelWidget.h"
 #include "Ch2LevelData.h"
 #include "Ch2GameMode.generated.h"
 
@@ -13,6 +14,7 @@ class UMaterialInterface;
 class UCh2HUDWidget;
 class ULevelSequence;
 class UCameraShakeBase;
+class APostProcessVolume;
 
 /** 一个爆炸玩偶的运行时状态（小丑日字跳后留在前一 cell 上）。 */
 USTRUCT(BlueprintType)
@@ -150,6 +152,20 @@ public:
 	UFUNCTION(Exec)
 	void PV_SetMoveBudget(int32 MoveBudget = 99);
 
+	/** One-call PV capture setup: long move budget, two-turn puppets, and clean capture HUD. */
+	UFUNCTION(Exec)
+	void PV_ApplyRecordingDefaults();
+
+	/** Quick command presets: record/live/bake/gold log the intended Ch2 capture setup. */
+	UFUNCTION(Exec)
+	void PV_Ch2Preset(FName PresetId);
+
+	UFUNCTION(Exec)
+	void PV_LogGoldPath();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Ch2|PV")
+	bool bHideMoveCounterForPVRecording = true;
+
 	/** 爆炸 camera shake 振幅（unit）+ 时长（秒）。直接由 Tick 实现。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0"))
 	float ExplosionShakeMagnitude = 12.0f;
@@ -168,6 +184,18 @@ public:
 	/** HUD widget class（继承 UCh2HUDWidget）。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch2|Classes")
 	TSubclassOf<UCh2HUDWidget> Ch2HUDClass;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch2|Classes")
+	TSubclassOf<UCh2BeatPanelWidget> BeatPanelWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Presentation", meta=(ClampMin="0.2"))
+	float BeatPanelHoldSeconds = 1.45f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Presentation", meta=(ClampMin="0.05"))
+	float BeatPostProcessDuration = 0.62f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Presentation", meta=(ClampMin="0.0"))
+	float BeatPostProcessPeak = 0.72f;
 
 	UFUNCTION(BlueprintCallable, Category="Ch2")
 	void RefreshHighlights();
@@ -208,6 +236,9 @@ protected:
 	UPROPERTY()
 	UCh2HUDWidget* HUDWidget = nullptr;
 
+	UPROPERTY()
+	UCh2BeatPanelWidget* ActiveBeatPanel = nullptr;
+
 	/** Runtime cell 副本——BuildLevel 时从 LevelData.Cells 拷贝，
 	 *  之后所有 mutate（拾取、爆炸炸开）只动它，不污染源 DataAsset。 */
 	UPROPERTY()
@@ -234,7 +265,15 @@ protected:
 	// Camera shake Tick state
 	float ShakeElapsed = 0.0f;
 	float ShakeTotal = 0.0f;
+	float ActiveShakeMagnitude = 0.0f;
 	FVector CamBaseLoc = FVector::ZeroVector;
+
+	UPROPERTY()
+	APostProcessVolume* BeatPostProcessVolume = nullptr;
+
+	float BeatPostProcessElapsed = 0.0f;
+	bool bBeatPostProcessActive = false;
+	bool bBeatPostProcessMajor = false;
 
 	UPROPERTY()
 	AActor* CameraActorRef = nullptr;
@@ -257,7 +296,14 @@ protected:
 	void UpdatePathPreview(FIntPoint HoverCell, bool bValid);
 	void ClearPathPreview();
 	void SpawnClickRipple(const FVector& WorldPos);
+	void TriggerCameraKick(float Magnitude, float Duration);
+	void SpawnCellPulse(FIntPoint Cell, const FVector& Color, float RadiusScale = 2.2f, float LifeSpan = 0.35f);
+	void SpawnJuiceMarker(const FVector& WorldPos, const FVector& Color, float UniformScale, float LifeSpan, bool bSphere = true);
 	void ResetFloorColorsToBoardPattern();
+	void ShowBeatPanel(ECh2BeatPanelMoment Moment, float HoldSeconds = -1.0f);
+	FCh2BeatPanelPayload BuildBeatPanelPayload(ECh2BeatPanelMoment Moment) const;
+	void StartBeatPostProcessCue(bool bMajorBeat);
+	void UpdateBeatPostProcessCue(float DeltaSeconds);
 
 	/** Ritual 拍点：close-up camera + 眼睛 glimpse（取扣→机械眼一闪→缝扣回 Pearl）。
 	 *  spec: switching-ritual.md §3 时序表。 */
@@ -275,4 +321,7 @@ public:
 	/** Pawn 在 TryMoveTo 成功时调，触发 click ripple。 */
 	UFUNCTION(BlueprintCallable, Category="Ch2")
 	void NotifyMoveCommitted(FIntPoint TargetCell);
+
+	UFUNCTION(BlueprintCallable, Category="Ch2")
+	void NotifyInvalidMove(FIntPoint TargetCell);
 };

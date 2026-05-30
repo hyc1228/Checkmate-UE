@@ -15,6 +15,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "Engine/PostProcessVolume.h"
+#include "Engine/Scene.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "LevelSequence.h"
@@ -78,6 +80,78 @@ void ACh2GameMode::PV_SetMoveBudget(int32 MoveBudget)
 #endif
 }
 
+void ACh2GameMode::PV_ApplyRecordingDefaults()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH2_RECORDING_DEFAULTS ignored in shipping build"));
+#else
+	RuntimeMoveBudgetOverride = 99;
+	PuppetExplodeAfterTurns = 2;
+	if (bPVSequencerBakeActive)
+	{
+		ResetFloorColorsToBoardPattern();
+	}
+	if (HUDWidget)
+	{
+		HUDWidget->SetMoveCounter(MoveCount, GetEffectiveMoveBudget());
+		HUDWidget->SetMoveCounterVisible(!bHideMoveCounterForPVRecording);
+	}
+	UE_LOG(LogTemp, Display, TEXT("PV_CH2_RECORDING_DEFAULTS MoveBudget=%d PuppetExplodeAfterTurns=%d HideMoveCounter=%s"),
+		GetEffectiveMoveBudget(),
+		PuppetExplodeAfterTurns,
+		bHideMoveCounterForPVRecording ? TEXT("true") : TEXT("false"));
+	UE_LOG(LogTemp, Display, TEXT("PV_CH2_CONFIG MoveBudget=%d PuppetExplodeAfterTurns=%d BakeMode=%s"),
+		GetEffectiveMoveBudget(),
+		PuppetExplodeAfterTurns,
+		bPVSequencerBakeActive ? TEXT("true") : TEXT("false"));
+	PV_LogGoldPath();
+#endif
+}
+
+void ACh2GameMode::PV_Ch2Preset(FName PresetId)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH2_PRESET ignored in shipping build Preset=%s"), *PresetId.ToString());
+#else
+	const FString Preset = PresetId.ToString().ToLower();
+	if (Preset == TEXT("bake") || Preset == TEXT("c5") || Preset == TEXT("c7") || Preset == TEXT("c10") || Preset == TEXT("c11"))
+	{
+		PV_SetSequencerBakeActive(true);
+		PV_ApplyRecordingDefaults();
+		UE_LOG(LogTemp, Display, TEXT("PV_CH2_PRESET Applied=%s Mode=SequencerBake"), *Preset);
+	}
+	else if (Preset == TEXT("live"))
+	{
+		PV_SetSequencerBakeActive(false);
+		RuntimeMoveBudgetOverride = INDEX_NONE;
+		if (HUDWidget)
+		{
+			HUDWidget->SetMoveCounterVisible(true);
+			HUDWidget->SetMoveCounter(MoveCount, GetEffectiveMoveBudget());
+		}
+		UE_LOG(LogTemp, Display, TEXT("PV_CH2_PRESET Applied=live MoveBudget=%d PuppetExplodeAfterTurns=%d BakeMode=false"),
+			GetEffectiveMoveBudget(),
+			PuppetExplodeAfterTurns);
+	}
+	else
+	{
+		PV_SetSequencerBakeActive(false);
+		PV_ApplyRecordingDefaults();
+		UE_LOG(LogTemp, Display, TEXT("PV_CH2_PRESET Applied=%s Mode=PVRecord"), Preset.IsEmpty() ? TEXT("record") : *Preset);
+	}
+#endif
+}
+
+void ACh2GameMode::PV_LogGoldPath()
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH2_GOLD_PATH ignored in shipping build"));
+#else
+	UE_LOG(LogTemp, Display, TEXT("PV_CH2_GOLD_PATH Start=(5,7) Step1=(5,4) Pickup=Clown Step2=(3,3) Step3=(4,1) Exit"));
+	UE_LOG(LogTemp, Display, TEXT("PV_CH2_ANCHORS WeddingWreckage=(3,4),(4,4) ClownPickup=(5,4) Destructible=(5,3) Exit=(4,1)"));
+#endif
+}
+
 void ACh2GameMode::BeginPlay()
 {
 	Super::BeginPlay();
@@ -101,6 +175,7 @@ void ACh2GameMode::BeginPlay()
 
 	BuildLevel();
 	SetUpTopDownCamera();
+	ShowBeatPanel(ECh2BeatPanelMoment::ChapterIntro, BeatPanelHoldSeconds + 0.35f);
 
 	UAudioService::PlayCueStatic(this, FName("Amb.Ch2"));  // 进 Ch2 开 ambient（如 CueTable 里有）
 }
@@ -288,6 +363,11 @@ void ACh2GameMode::BuildLevel()
 			{
 				HUDWidget->AddToViewport(/*ZOrder=*/10);
 				if (ActivePawn) HUDWidget->SetMode(ActivePawn->CurrentMode);
+				HUDWidget->SetMoveCounter(MoveCount, GetEffectiveMoveBudget());
+				if (bHideMoveCounterForPVRecording && GetEffectiveMoveBudget() >= 99)
+				{
+					HUDWidget->SetMoveCounterVisible(false);
+				}
 
 				// 出口方向 hint（屏幕方向相对玩家描述）
 				const FIntPoint ExitCell = LevelData->FindCellOfType(ECh2CellType::Exit);
@@ -313,6 +393,7 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	WorldElapsed += DeltaSeconds;
+	UpdateBeatPostProcessCue(DeltaSeconds);
 
 	// Camera shake：sin 振幅衰减
 	if (CameraActorRef && ShakeTotal > 0.0f)
@@ -321,13 +402,15 @@ void ACh2GameMode::Tick(float DeltaSeconds)
 		if (ShakeElapsed >= ShakeTotal)
 		{
 			ShakeTotal = 0.0f;
+			ActiveShakeMagnitude = 0.0f;
 			CameraActorRef->SetActorLocation(CamBaseLoc);
 		}
 		else
 		{
 			const float Decay = 1.0f - (ShakeElapsed / ShakeTotal);
-			const float OffsetZ = FMath::Sin(ShakeElapsed * 80.0f) * ExplosionShakeMagnitude * Decay;
-			const float OffsetX = FMath::Cos(ShakeElapsed * 65.0f) * ExplosionShakeMagnitude * 0.6f * Decay;
+			const float Magnitude = ActiveShakeMagnitude > 0.0f ? ActiveShakeMagnitude : ExplosionShakeMagnitude;
+			const float OffsetZ = FMath::Sin(ShakeElapsed * 80.0f) * Magnitude * Decay;
+			const float OffsetX = FMath::Cos(ShakeElapsed * 65.0f) * Magnitude * 0.6f * Decay;
 			CameraActorRef->SetActorLocation(CamBaseLoc + FVector(OffsetX, 0, OffsetZ));
 		}
 	}
@@ -426,6 +509,156 @@ void ACh2GameMode::ResetFloorColorsToBoardPattern()
 		const bool bWhite = ((P.Key.X + P.Key.Y) % 2) == 0;
 		MC->SetVectorParameterValueOnMaterials(TEXT("Color"),
 			bWhite ? FVector(0.85f, 0.85f, 0.85f) : FVector(0.15f, 0.15f, 0.15f));
+	}
+}
+
+FCh2BeatPanelPayload ACh2GameMode::BuildBeatPanelPayload(ECh2BeatPanelMoment Moment) const
+{
+	FCh2BeatPanelPayload Payload;
+	Payload.Moment = Moment;
+
+	switch (Moment)
+	{
+	case ECh2BeatPanelMoment::ChapterIntro:
+		Payload.Eyebrow = FText::FromString(TEXT("CHAPTER II / WASTE BOARD"));
+		Payload.Title = FText::FromString(TEXT("THE GRID WAKES"));
+		Payload.Body = FText::FromString(TEXT("Pearl body. Mechanical eye. Follow the gold path."));
+		Payload.CueId = FName("Ch2.PanelIntro");
+		Payload.bMajorBeat = true;
+		break;
+	case ECh2BeatPanelMoment::ModeRitual:
+		Payload.Eyebrow = FText::FromString(TEXT("RITUAL / BUTTON EYE"));
+		Payload.Title = FText::FromString(TEXT("CLOWN MOVE UNLOCKED"));
+		Payload.Body = FText::FromString(TEXT("The line breaks into an L."));
+		Payload.CueId = FName("Ch2.PanelRitual");
+		Payload.bMajorBeat = true;
+		break;
+	case ECh2BeatPanelMoment::PuppetArmed:
+		Payload.Eyebrow = FText::FromString(TEXT("DELAYED BLAST"));
+		Payload.Title = FText::FromString(TEXT("PUPPET ARMED"));
+		Payload.Body = FText::FromString(TEXT("A button-eye copy waits behind you."));
+		Payload.CueId = FName("Ch2.PanelPuppet");
+		Payload.bMajorBeat = false;
+		break;
+	case ECh2BeatPanelMoment::DestructibleBroken:
+		Payload.Eyebrow = FText::FromString(TEXT("BREACH"));
+		Payload.Title = FText::FromString(TEXT("KING DOOR SPLIT"));
+		Payload.Body = FText::FromString(TEXT("The blocked file opens."));
+		Payload.CueId = FName("Ch2.PanelBreach");
+		Payload.bMajorBeat = true;
+		break;
+	case ECh2BeatPanelMoment::ExitReached:
+		Payload.Eyebrow = FText::FromString(TEXT("EXIT SIGNAL"));
+		Payload.Title = FText::FromString(TEXT("COLOR RETURNS"));
+		Payload.Body = FText::FromString(TEXT("Leave before the board remembers you."));
+		Payload.CueId = FName("Ch2.PanelExit");
+		Payload.bMajorBeat = true;
+		break;
+	}
+
+	return Payload;
+}
+
+void ACh2GameMode::ShowBeatPanel(ECh2BeatPanelMoment Moment, float HoldSeconds)
+{
+	if (bPVSequencerBakeActive)
+	{
+		return;
+	}
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		return;
+	}
+
+	TSubclassOf<UCh2BeatPanelWidget> PanelClass = BeatPanelWidgetClass;
+	if (!PanelClass)
+	{
+		PanelClass = UCh2BeatPanelWidget::StaticClass();
+	}
+
+	if (ActiveBeatPanel)
+	{
+		ActiveBeatPanel->RemoveFromParent();
+		ActiveBeatPanel = nullptr;
+	}
+
+	ActiveBeatPanel = CreateWidget<UCh2BeatPanelWidget>(PC, PanelClass);
+	if (!ActiveBeatPanel)
+	{
+		return;
+	}
+
+	const FCh2BeatPanelPayload Payload = BuildBeatPanelPayload(Moment);
+	const float Lifetime = HoldSeconds > 0.0f ? HoldSeconds : BeatPanelHoldSeconds;
+	ActiveBeatPanel->ConfigurePanel(Payload, Lifetime);
+	ActiveBeatPanel->AddToViewport(/*ZOrder=*/118);
+	StartBeatPostProcessCue(Payload.bMajorBeat);
+	UAudioService::PlayCueStatic(this, Payload.bMajorBeat ? FName("Ch1.PanelMajor") : FName("Ch1.PanelOpen"));
+
+	FTimerHandle DismissTimer;
+	GetWorldTimerManager().SetTimer(DismissTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		if (ActiveBeatPanel)
+		{
+			ActiveBeatPanel->StartDismiss();
+		}
+	}), Lifetime, false);
+}
+
+void ACh2GameMode::StartBeatPostProcessCue(bool bMajorBeat)
+{
+	if (BeatPostProcessDuration <= 0.0f || BeatPostProcessPeak <= 0.0f || bPVSequencerBakeActive)
+	{
+		return;
+	}
+
+	if (!BeatPostProcessVolume)
+	{
+		BeatPostProcessVolume = GetWorld()->SpawnActor<APostProcessVolume>(
+			APostProcessVolume::StaticClass(),
+			FVector::ZeroVector,
+			FRotator::ZeroRotator);
+		if (BeatPostProcessVolume)
+		{
+			BeatPostProcessVolume->bUnbound = true;
+			BeatPostProcessVolume->Priority = 32.0f;
+			BeatPostProcessVolume->BlendWeight = 0.0f;
+		}
+	}
+
+	BeatPostProcessElapsed = 0.0f;
+	bBeatPostProcessActive = BeatPostProcessVolume != nullptr;
+	bBeatPostProcessMajor = bMajorBeat;
+}
+
+void ACh2GameMode::UpdateBeatPostProcessCue(float DeltaSeconds)
+{
+	if (!bBeatPostProcessActive || !BeatPostProcessVolume)
+	{
+		return;
+	}
+
+	BeatPostProcessElapsed += DeltaSeconds;
+	const float T = FMath::Clamp(BeatPostProcessElapsed / FMath::Max(0.05f, BeatPostProcessDuration), 0.0f, 1.0f);
+	const float Pulse = FMath::Sin(T * PI) * BeatPostProcessPeak * (bBeatPostProcessMajor ? 1.0f : 0.55f);
+
+	FPostProcessSettings& PP = BeatPostProcessVolume->Settings;
+	BeatPostProcessVolume->BlendWeight = FMath::Clamp(Pulse, 0.0f, 1.0f);
+	PP.bOverride_VignetteIntensity = true;
+	PP.bOverride_SceneFringeIntensity = true;
+	PP.bOverride_BloomIntensity = true;
+	PP.bOverride_AutoExposureBias = true;
+	PP.VignetteIntensity = 0.22f + Pulse * (bBeatPostProcessMajor ? 0.38f : 0.18f);
+	PP.SceneFringeIntensity = Pulse * (bBeatPostProcessMajor ? 1.8f : 0.75f);
+	PP.BloomIntensity = 0.28f + Pulse * (bBeatPostProcessMajor ? 1.05f : 0.45f);
+	PP.AutoExposureBias = Pulse * (bBeatPostProcessMajor ? 0.18f : 0.08f);
+
+	if (BeatPostProcessElapsed >= BeatPostProcessDuration)
+	{
+		BeatPostProcessVolume->BlendWeight = 0.0f;
+		bBeatPostProcessActive = false;
 	}
 }
 
@@ -530,9 +763,12 @@ void ACh2GameMode::RestartCh2Level()
 
 void ACh2GameMode::NotifyPawnMoved(FIntPoint FromCell, FIntPoint ToCell, bool bWasClownMove)
 {
+	SpawnCellPulse(ToCell, bWasClownMove ? FVector(1.45f, 0.85f, 0.2f) : FVector(0.75f, 0.95f, 1.4f), bWasClownMove ? 1.55f : 1.25f, 0.28f);
+
 	// 小丑日字跳后在前一 cell 留一个玩偶（如果该 cell 没特殊类型）
 	if (bWasClownMove && LevelData && GetCellType(FromCell) == ECh2CellType::Empty)
 	{
+		SpawnCellPulse(FromCell, FVector(1.0f, 0.35f, 0.08f), 1.2f, 0.26f);
 		SpawnPuppetAt(FromCell);
 	}
 	// 任何一步都推进所有玩偶倒计时
@@ -753,14 +989,69 @@ void ACh2GameMode::SpawnClickRipple(const FVector& WorldPos)
 	R->SetLifeSpan(0.4f);
 }
 
+void ACh2GameMode::TriggerCameraKick(float Magnitude, float Duration)
+{
+	if (bPVSequencerBakeActive)
+	{
+		return;
+	}
+	ShakeElapsed = 0.0f;
+	ShakeTotal = FMath::Max(ShakeTotal, Duration);
+	ActiveShakeMagnitude = FMath::Max(ActiveShakeMagnitude, Magnitude);
+}
+
+void ACh2GameMode::SpawnJuiceMarker(const FVector& WorldPos, const FVector& Color, float UniformScale, float LifeSpan, bool bSphere)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, bSphere
+		? TEXT("/Engine/BasicShapes/Sphere.Sphere")
+		: TEXT("/Engine/BasicShapes/Cube.Cube"));
+	AStaticMeshActor* Marker = World->SpawnActor<AStaticMeshActor>(WorldPos, FRotator::ZeroRotator);
+	if (!Marker) return;
+
+	Marker->SetMobility(EComponentMobility::Movable);
+	if (UStaticMeshComponent* MC = Marker->GetStaticMeshComponent())
+	{
+		MC->SetStaticMesh(Mesh);
+		MC->SetRelativeScale3D(FVector(UniformScale));
+		MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		if (EmissiveMaterial)
+		{
+			MC->SetMaterial(0, EmissiveMaterial);
+		}
+		MC->SetVectorParameterValueOnMaterials(TEXT("Color"), Color);
+		MC->SetVectorParameterValueOnMaterials(TEXT("Emissive Color"), Color);
+		MC->SetScalarParameterValueOnMaterials(TEXT("Intensity"), 8.0f);
+	}
+	Marker->SetLifeSpan(LifeSpan);
+}
+
+void ACh2GameMode::SpawnCellPulse(FIntPoint Cell, const FVector& Color, float RadiusScale, float LifeSpan)
+{
+	if (!LevelData) return;
+	const FVector Center(Cell.X * LevelData->CellSize, Cell.Y * LevelData->CellSize, 18.0f);
+	SpawnJuiceMarker(Center, Color, RadiusScale, LifeSpan, false);
+}
+
 void ACh2GameMode::NotifyMoveCommitted(FIntPoint TargetCell)
 {
 	if (!LevelData) return;
 	UAudioService::PlayCueStatic(this, FName("Ch2.Move"));
 	const FVector P(TargetCell.X * LevelData->CellSize, TargetCell.Y * LevelData->CellSize, 5.0f);
 	SpawnClickRipple(P);
+	SpawnCellPulse(TargetCell, FVector(0.3f, 1.25f, 1.6f), 1.15f, 0.22f);
 	ClearPathPreview();
 	if (GhostPawn) GhostPawn->SetActorHiddenInGame(true);
+}
+
+void ACh2GameMode::NotifyInvalidMove(FIntPoint TargetCell)
+{
+	if (!LevelData || !IsInBounds(TargetCell)) return;
+	UAudioService::PlayCueStatic(this, FName("Ch2.Invalid"), 0.65f);
+	SpawnCellPulse(TargetCell, FVector(1.4f, 0.05f, 0.08f), 1.1f, 0.22f);
+	TriggerCameraKick(3.5f, 0.12f);
 }
 
 void ACh2GameMode::SpawnPuppetAt(FIntPoint Cell)
@@ -804,6 +1095,10 @@ void ACh2GameMode::SpawnPuppetAt(FIntPoint Cell)
 	P.TurnsRemaining = PuppetExplodeAfterTurns;
 	P.RuntimeActor = A;
 	Puppets.Add(P);
+	SpawnCellPulse(Cell, FVector(1.4f, 0.45f, 0.08f), 1.45f, 0.32f);
+	SpawnJuiceMarker(Loc + FVector(0.0f, 0.0f, CS * 0.45f), FVector(1.5f, 0.55f, 0.1f), 0.45f, 0.38f);
+	TriggerCameraKick(2.0f, 0.10f);
+	ShowBeatPanel(ECh2BeatPanelMoment::PuppetArmed, 0.95f);
 	UE_LOG(LogTemp, Display, TEXT("CH2_PUPPET_SPAWN Cell=(%d,%d) TurnsRemaining=%d ActivePuppets=%d"),
 		Cell.X, Cell.Y, P.TurnsRemaining, Puppets.Num());
 
@@ -826,6 +1121,7 @@ void ACh2GameMode::TickPuppets()
 			UE_LOG(LogTemp, Display, TEXT("CH2_PUPPET_TICK Cell=(%d,%d) TurnsRemaining=%d"),
 				Puppets[i].Cell.X, Puppets[i].Cell.Y, Puppets[i].TurnsRemaining);
 			UAudioService::PlayCueStatic(this, FName("Ch2.PuppetTick"), 0.7f);
+			SpawnCellPulse(Puppets[i].Cell, FVector(1.2f, 0.12f, 0.08f), 0.85f, 0.18f);
 		}
 	}
 }
@@ -855,11 +1151,14 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 	UE_LOG(LogTemp, Display, TEXT("Ch2: 爆炸玩偶 BOOM @ (%d,%d)"), P.Cell.X, P.Cell.Y);
 
 	UAudioService::PlayCueStatic(this, FName("Ch2.Explode"));
+	SpawnCellPulse(P.Cell, FVector(2.0f, 1.35f, 0.25f), 2.6f, 0.42f);
+	SpawnJuiceMarker(FVector(P.Cell.X * LevelData->CellSize, P.Cell.Y * LevelData->CellSize, LevelData->CellSize * 0.7f), FVector(2.0f, 1.6f, 0.6f), 1.2f, 0.32f);
 
 	// 优先播 Ch2.Explosion sequence；总是叠加 camera shake + flash 球（即时反馈）
 	TryPlaySequence(TEXT("Ch2.Explosion"));
 	ShakeElapsed = 0.0f;
 	ShakeTotal = ExplosionShakeDuration;
+	ActiveShakeMagnitude = ExplosionShakeMagnitude;
 
 	// Flash 占位：在爆炸位 spawn 一颗亮黄白球，0.3s 后自销毁
 	if (UWorld* W = GetWorld())
@@ -895,6 +1194,9 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 				if (*Found) (*Found)->Destroy();
 				CellActors.Remove(N);
 			}
+			SpawnCellPulse(N, FVector(1.8f, 1.25f, 0.45f), 1.75f, 0.35f);
+			SpawnJuiceMarker(FVector(N.X * LevelData->CellSize, N.Y * LevelData->CellSize, LevelData->CellSize * 0.55f), FVector(1.6f, 1.0f, 0.35f), 0.55f, 0.5f);
+			ShowBeatPanel(ECh2BeatPanelMoment::DestructibleBroken, 1.2f);
 			UE_LOG(LogTemp, Display, TEXT("CH2_DESTRUCTIBLE_REMOVED Cell=(%d,%d) TriggerPuppet=(%d,%d)"),
 				N.X, N.Y, P.Cell.X, P.Cell.Y);
 			UE_LOG(LogTemp, Display, TEXT("Ch2:   炸开 (%d,%d)"), N.X, N.Y);
@@ -925,6 +1227,8 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 				UE_LOG(LogTemp, Display, TEXT("SC_Ch2.Bell Cell=(%d,%d) WeddingNeighbor=(%d,%d)"),
 					Cell.X, Cell.Y, Cell.X + D.X, Cell.Y + D.Y);
 				UAudioService::PlayCueStatic(this, FName("Ch2.Bell"));
+				SpawnCellPulse(Cell, FVector(1.25f, 1.25f, 1.45f), 1.45f, 0.42f);
+				SpawnCellPulse(FIntPoint(Cell.X + D.X, Cell.Y + D.Y), FVector(1.1f, 1.1f, 1.35f), 1.15f, 0.42f);
 				BellRungAtCells.Add(Cell);
 				break;
 			}
@@ -936,6 +1240,10 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 	if (Type == ECh2CellType::ClownPickup)
 	{
 		UAudioService::PlayCueStatic(this, FName("Ch2.Ritual"));
+		SpawnCellPulse(Cell, FVector(1.7f, 1.0f, 0.2f), 2.3f, 0.55f);
+		SpawnJuiceMarker(FVector(Cell.X * LevelData->CellSize, Cell.Y * LevelData->CellSize, LevelData->CellSize * 0.95f), FVector(0.3f, 1.4f, 1.8f), 0.9f, 0.55f);
+		TriggerCameraKick(5.0f, 0.20f);
+		ShowBeatPanel(ECh2BeatPanelMoment::ModeRitual, 1.25f);
 		// 优先播 Ch2.Pickup sequence；fallback：UMG fade + close-up glimpse
 		const bool bPlayedSeq = TryPlaySequence(TEXT("Ch2.Pickup"));
 		if (!bPlayedSeq)
@@ -962,6 +1270,10 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 			return;
 		}
 		UAudioService::PlayCueStatic(this, FName("Ch2.Victory"));
+		SpawnCellPulse(Cell, FVector(0.35f, 2.0f, 0.8f), 2.8f, 0.7f);
+		SpawnJuiceMarker(FVector(Cell.X * LevelData->CellSize, Cell.Y * LevelData->CellSize, LevelData->CellSize * 1.2f), FVector(0.45f, 2.0f, 1.0f), 1.1f, 0.8f);
+		TriggerCameraKick(4.0f, 0.25f);
+		ShowBeatPanel(ECh2BeatPanelMoment::ExitReached, 1.45f);
 		// 优先播 Ch2.Victory sequence；fallback UMG victory screen
 		if (!TryPlaySequence(TEXT("Ch2.Victory")) && HUDWidget)
 		{
