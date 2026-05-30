@@ -10,6 +10,7 @@
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/CameraShakeBase.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
@@ -17,6 +18,7 @@
 #include "Engine/World.h"
 #include "Engine/PostProcessVolume.h"
 #include "Engine/Scene.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "LevelSequence.h"
@@ -322,7 +324,7 @@ void ACh2GameMode::BuildLevel()
 			{
 				JiangLabel->SetupAttachment(DecoActor->GetRootComponent());
 				JiangLabel->RegisterComponent();
-				JiangLabel->SetText(FText::FromString(TEXT("将")));
+				JiangLabel->SetText(FText::FromString(TEXT("\u5C06")));
 				JiangLabel->SetHorizontalAlignment(EHTA_Center);
 				JiangLabel->SetVerticalAlignment(EVRTA_TextCenter);
 				JiangLabel->SetWorldSize(CS * 0.32f);
@@ -335,6 +337,8 @@ void ACh2GameMode::BuildLevel()
 	}
 
 	// 3) spawn 玩家 pawn 到 Start cell
+	SpawnTraceDecalFallback();
+
 	const FIntPoint StartCell = LevelData->FindCellOfType(ECh2CellType::Start);
 	const FVector StartLoc(StartCell.X * CS, StartCell.Y * CS, CS * 0.5f);
 
@@ -362,6 +366,7 @@ void ACh2GameMode::BuildLevel()
 			if (HUDWidget)
 			{
 				HUDWidget->AddToViewport(/*ZOrder=*/10);
+				HUDWidget->SetMinimalHUDMode(bUseMinimalHUD);
 				if (ActivePawn) HUDWidget->SetMode(ActivePawn->CurrentMode);
 				HUDWidget->SetMoveCounter(MoveCount, GetEffectiveMoveBudget());
 				if (bHideMoveCounterForPVRecording && GetEffectiveMoveBudget() >= 99)
@@ -566,6 +571,16 @@ void ACh2GameMode::ShowBeatPanel(ECh2BeatPanelMoment Moment, float HoldSeconds)
 		return;
 	}
 
+	const FCh2BeatPanelPayload Payload = BuildBeatPanelPayload(Moment);
+	const float Lifetime = HoldSeconds > 0.0f ? HoldSeconds : BeatPanelHoldSeconds;
+	StartBeatPostProcessCue(Payload.bMajorBeat);
+	UAudioService::PlayCueStatic(this, Payload.bMajorBeat ? FName("Ch1.PanelMajor") : FName("Ch1.PanelOpen"));
+
+	if (!bShowTextBeatPanels)
+	{
+		return;
+	}
+
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PC)
 	{
@@ -590,12 +605,8 @@ void ACh2GameMode::ShowBeatPanel(ECh2BeatPanelMoment Moment, float HoldSeconds)
 		return;
 	}
 
-	const FCh2BeatPanelPayload Payload = BuildBeatPanelPayload(Moment);
-	const float Lifetime = HoldSeconds > 0.0f ? HoldSeconds : BeatPanelHoldSeconds;
 	ActiveBeatPanel->ConfigurePanel(Payload, Lifetime);
 	ActiveBeatPanel->AddToViewport(/*ZOrder=*/118);
-	StartBeatPostProcessCue(Payload.bMajorBeat);
-	UAudioService::PlayCueStatic(this, Payload.bMajorBeat ? FName("Ch1.PanelMajor") : FName("Ch1.PanelOpen"));
 
 	FTimerHandle DismissTimer;
 	GetWorldTimerManager().SetTimer(DismissTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
@@ -1035,6 +1046,113 @@ void ACh2GameMode::SpawnCellPulse(FIntPoint Cell, const FVector& Color, float Ra
 	SpawnJuiceMarker(Center, Color, RadiusScale, LifeSpan, false);
 }
 
+void ACh2GameMode::SpawnTraceDecalFallback()
+{
+	if (!bSpawnTraceDecalFallback || !LevelData)
+	{
+		return;
+	}
+
+	const FIntPoint TraceCell(3, 3);
+	if (!IsInBounds(TraceCell))
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float CS = LevelData->CellSize;
+	AActor* TraceActor = World->SpawnActor<AActor>(
+		FVector(TraceCell.X * CS, TraceCell.Y * CS, 8.0f),
+		FRotator::ZeroRotator);
+	if (!TraceActor)
+	{
+		return;
+	}
+
+	USceneComponent* Root = NewObject<USceneComponent>(TraceActor);
+	TraceActor->SetRootComponent(Root);
+	Root->RegisterComponent();
+	TraceActor->Tags.Add(TEXT("Ch2_TraceDecalFallback"));
+
+	UTextRenderComponent* TraceText = NewObject<UTextRenderComponent>(TraceActor);
+	if (!TraceText)
+	{
+		return;
+	}
+
+	TraceText->SetupAttachment(Root);
+	TraceText->RegisterComponent();
+	TraceText->SetText(FText::FromString(TEXT("I  V  X")));
+	TraceText->SetHorizontalAlignment(EHTA_Center);
+	TraceText->SetVerticalAlignment(EVRTA_TextCenter);
+	TraceText->SetWorldSize(CS * 0.18f);
+	TraceText->SetTextRenderColor(FColor(218, 218, 224));
+	TraceText->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
+	TraceText->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
+
+	UE_LOG(LogTemp, Display, TEXT("CH2_TRACE_DECAL_FALLBACK Cell=(%d,%d)"), TraceCell.X, TraceCell.Y);
+}
+
+void ACh2GameMode::SpawnJiangDebrisBurst(FIntPoint Cell)
+{
+	if (!LevelData)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float CS = LevelData->CellSize;
+	const FVector Center(Cell.X * CS, Cell.Y * CS, CS * 0.62f);
+	for (int32 i = 0; i < 6; ++i)
+	{
+		const float Angle = (static_cast<float>(i) / 6.0f) * 360.0f + FMath::FRandRange(-12.0f, 12.0f);
+		const float Radius = FMath::FRandRange(CS * 0.08f, CS * 0.38f);
+		const FVector Offset(FMath::Cos(FMath::DegreesToRadians(Angle)) * Radius,
+			FMath::Sin(FMath::DegreesToRadians(Angle)) * Radius,
+			FMath::FRandRange(-CS * 0.06f, CS * 0.16f));
+
+		AActor* Fragment = World->SpawnActor<AActor>(
+			Center + Offset,
+			FRotator(0.0f, Angle, FMath::FRandRange(-28.0f, 28.0f)));
+		if (!Fragment)
+		{
+			continue;
+		}
+
+		USceneComponent* Root = NewObject<USceneComponent>(Fragment);
+		Fragment->SetRootComponent(Root);
+		Root->RegisterComponent();
+
+		UTextRenderComponent* Text = NewObject<UTextRenderComponent>(Fragment);
+		if (!Text)
+		{
+			Fragment->Destroy();
+			continue;
+		}
+
+		Text->SetupAttachment(Root);
+		Text->RegisterComponent();
+		Text->SetText(FText::FromString(TEXT("\u5C06")));
+		Text->SetHorizontalAlignment(EHTA_Center);
+		Text->SetVerticalAlignment(EVRTA_TextCenter);
+		Text->SetWorldSize(CS * FMath::FRandRange(0.12f, 0.2f));
+		Text->SetTextRenderColor(FColor(248, 248, 250));
+		Text->SetRelativeRotation(FRotator(75.0f, 0.0f, FMath::FRandRange(-24.0f, 24.0f)));
+
+		Fragment->SetLifeSpan(FMath::FRandRange(0.45f, 0.8f));
+	}
+}
+
 void ACh2GameMode::NotifyMoveCommitted(FIntPoint TargetCell)
 {
 	if (!LevelData) return;
@@ -1196,6 +1314,7 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 			}
 			SpawnCellPulse(N, FVector(1.8f, 1.25f, 0.45f), 1.75f, 0.35f);
 			SpawnJuiceMarker(FVector(N.X * LevelData->CellSize, N.Y * LevelData->CellSize, LevelData->CellSize * 0.55f), FVector(1.6f, 1.0f, 0.35f), 0.55f, 0.5f);
+			SpawnJiangDebrisBurst(N);
 			ShowBeatPanel(ECh2BeatPanelMoment::DestructibleBroken, 1.2f);
 			UE_LOG(LogTemp, Display, TEXT("CH2_DESTRUCTIBLE_REMOVED Cell=(%d,%d) TriggerPuppet=(%d,%d)"),
 				N.X, N.Y, P.Cell.X, P.Cell.Y);
@@ -1268,6 +1387,10 @@ void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 		{
 			UE_LOG(LogTemp, Display, TEXT("PV_CH2_BAKE_SUPPRESS VictoryUIAudio"));
 			return;
+		}
+		if (ActivePawn)
+		{
+			ActivePawn->RevealHumanForm();
 		}
 		UAudioService::PlayCueStatic(this, FName("Ch2.Victory"));
 		SpawnCellPulse(Cell, FVector(0.35f, 2.0f, 0.8f), 2.8f, 0.7f);

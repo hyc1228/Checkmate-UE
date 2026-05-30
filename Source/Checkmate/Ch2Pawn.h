@@ -104,6 +104,23 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0", ClampMax="0.5"))
 	float MoveSquashAmount = 0.12f;
 
+	/** Ch2 pawn reads as a chess statue until the exit reveal. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Statue")
+	bool bStartAsStatue = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Statue")
+	FVector StatueTint = FVector(0.58f, 0.58f, 0.64f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Statue")
+	FVector HumanTint = FVector(1.0f, 0.72f, 0.56f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Statue", meta=(ClampMin="0.05"))
+	float VictoryColorizeDuration = 1.15f;
+
+	/** Called when the pawn reaches the exit: the statue gains warm human color. */
+	UFUNCTION(BlueprintCallable, Category="Ch2|Statue")
+	void RevealHumanForm();
+
 	/** 按扣眼材质（spec：芭蕾模式 = 按扣眼 / 珍珠暖白）。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|EyeMotif")
 	UMaterialInterface* EyeMaterial_Pearl = nullptr;
@@ -130,6 +147,7 @@ protected:
 
 	void ComputeBalletMoves(TArray<FIntPoint>& OutMoves) const;
 	void ComputeClownMoves(TArray<FIntPoint>& OutMoves) const;
+	void ApplyBodyTint(const FVector& Tint);
 
 	// 移动 lerp 状态
 	bool bMoving = false;
@@ -140,4 +158,7 @@ protected:
 	bool bPendingClownMove = false;
 	FIntPoint PendingFromCell = FIntPoint::ZeroValue;
 	float ModePulseElapsed = 99.0f;
+	bool bIsStatueForm = true;
+	bool bVictoryColorizeActive = false;
+	float VictoryColorizeElapsed = 0.0f;
 };

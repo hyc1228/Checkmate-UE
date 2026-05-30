@@ -72,6 +72,7 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	bHasDriftedFalseNeg = false;
 	bAwaitingNext = false;
 	bShiftEnded = false;
+	bQuotaFallbackLogged = false;
 	OpticalEdgeOpacityT = OpticalTargetEdgeOpacityT = OpticalBaseOpacity;
 	OpticalEdgeRadiusT = OpticalTargetEdgeRadiusT = 0.0f;
 	OpticalPulseT = OpticalTargetPulseT = 0.0f;
@@ -446,7 +447,15 @@ bool UInspectionScreen::CheckShiftTermination()
 {
 	if (bShiftEnded) return true;
 
-	const bool bUseQuota = (PassQuota > 0 || RejectQuota > 0);
+	const bool bQuotaConfigured = (PassQuota > 0 || RejectQuota > 0);
+	const bool bQuotaPossible = !bQuotaConfigured || IsQuotaPossibleWithCurrentCriteria();
+	if (bQuotaConfigured && !bQuotaPossible && !bQuotaFallbackLogged)
+	{
+		bQuotaFallbackLogged = true;
+		UE_LOG(LogTemp, Warning,
+			TEXT("[InspectionScreen] Current cards make the configured pass/reject quota impossible; falling back to CorrectGoal=%d."),
+			CorrectGoal);
+	}
 
 	// 失败：误判超上限
 	if (MaxMisjudgmentsBeforeFail > 0 && MisjudgmentCount >= MaxMisjudgmentsBeforeFail)
@@ -479,7 +488,7 @@ bool UInspectionScreen::CheckShiftTermination()
 	}
 
 	// 成功
-	bool bDone = bUseQuota
+	bool bDone = (bQuotaConfigured && bQuotaPossible)
 		? (TrueAcceptCount >= PassQuota && TrueRejectCount >= RejectQuota)
 		: (CorrectCount >= CorrectGoal);
 
@@ -522,6 +531,33 @@ bool UInspectionScreen::CheckShiftTermination()
 	}
 
 	return false;
+}
+
+bool UInspectionScreen::IsQuotaPossibleWithCurrentCriteria() const
+{
+	bool bHasObjectivePass = false;
+	bool bHasObjectiveReject = false;
+
+	for (const UDollData* Doll : DollSequence)
+	{
+		FString FailReason;
+		const EJudgmentVerdict Verdict = UJudgmentEvaluator::EvaluateDoll(JudgmentCards, Doll, FailReason);
+		if (Verdict == EJudgmentVerdict::Pass)
+		{
+			bHasObjectivePass = true;
+		}
+		else
+		{
+			bHasObjectiveReject = true;
+		}
+
+		if ((!PassQuota || bHasObjectivePass) && (!RejectQuota || bHasObjectiveReject))
+		{
+			return true;
+		}
+	}
+
+	return (!PassQuota || bHasObjectivePass) && (!RejectQuota || bHasObjectiveReject);
 }
 
 void UInspectionScreen::ApplyMisjudgmentPressure()
@@ -732,6 +768,7 @@ void UInspectionScreen::EnsureOpticalInversionPostProcess()
 		{
 			MisjudgmentPPVolume->bUnbound = true;
 			MisjudgmentPPVolume->BlendWeight = 1.0f;
+			MisjudgmentPPVolume->Priority = 40.0f;
 		}
 	}
 
@@ -918,12 +955,20 @@ void UInspectionScreen::UpdateVerdictPostProcessFeedback(float DeltaSeconds)
 	const float T = FMath::Clamp(VerdictPostProcessElapsed / FMath::Max(0.05f, VerdictPostProcessTotal), 0.0f, 1.0f);
 	const float Pulse = FMath::Sin(T * PI) * VerdictPostProcessPeak;
 	const float MisjudgmentPressure = FMath::Clamp(MisjudgmentCount / 5.0f, 0.0f, 1.0f);
+	const float TintStrength = FMath::Clamp(Pulse * (bVerdictPostProcessCorrect ? 0.62f : 0.95f), 0.0f, 1.0f);
 
 	FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
+	MisjudgmentPPVolume->BlendWeight = 1.0f;
 	PP.bOverride_VignetteIntensity = true;
 	PP.VignetteIntensity = FMath::Max(
 		MisjudgmentCount > 0 ? FMath::Lerp(0.35f, 1.10f, OpticalTargetEdgeOpacityT) : 0.25f,
 		(bVerdictPostProcessCorrect ? 0.38f : 0.62f) + Pulse * (bVerdictPostProcessCorrect ? 0.35f : 0.72f));
+
+	PP.bOverride_SceneColorTint = true;
+	PP.SceneColorTint = FMath::Lerp(
+		FLinearColor::White,
+		bVerdictPostProcessCorrect ? CorrectPostProcessTint : WrongPostProcessTint,
+		TintStrength);
 
 	PP.bOverride_SceneFringeIntensity = true;
 	PP.SceneFringeIntensity = FMath::Lerp(0.0f, 2.5f, MisjudgmentPressure)
@@ -967,6 +1012,7 @@ void UInspectionScreen::RestorePostProcessAfterVerdictFeedback()
 	FPostProcessSettings& PP = MisjudgmentPPVolume->Settings;
 	PP.bOverride_BloomIntensity = false;
 	PP.bOverride_AutoExposureBias = false;
+	PP.bOverride_SceneColorTint = false;
 
 	if (MisjudgmentCount > 0)
 	{

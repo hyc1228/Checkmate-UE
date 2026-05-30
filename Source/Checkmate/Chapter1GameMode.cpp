@@ -12,13 +12,18 @@
 
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
 #include "Engine/PostProcessVolume.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "TimerManager.h"
 
 AChapter1GameMode::AChapter1GameMode()
@@ -82,6 +87,8 @@ void AChapter1GameMode::BeginPlay()
 		}
 	}
 
+	EnsureRuntimeInspectionBackdrop();
+
 	CurrentShiftIdx = 0;
 	ShowShiftIntro(CurrentShiftIdx);
 }
@@ -93,8 +100,84 @@ void AChapter1GameMode::ApplyRuntimeCameraFraming(AActor* CameraActor) const
 		return;
 	}
 
-	const FRotator LookAtRotation = (RuntimeCameraLookAt - RuntimeCameraLocation).Rotation();
-	CameraActor->SetActorLocationAndRotation(RuntimeCameraLocation, LookAtRotation);
+	const FVector CameraLocation = bUseFlatFrontInspectionCamera
+		? FVector(RuntimeCameraLocation.X, 0.0f, RuntimeCameraLookAt.Z)
+		: RuntimeCameraLocation;
+	const FVector LookAt = bUseFlatFrontInspectionCamera
+		? FVector(0.0f, 0.0f, RuntimeCameraLookAt.Z)
+		: RuntimeCameraLookAt;
+	const FRotator LookAtRotation = (LookAt - CameraLocation).Rotation();
+	CameraActor->SetActorLocationAndRotation(CameraLocation, LookAtRotation);
+
+	if (ACameraActor* InspectionCamera = Cast<ACameraActor>(CameraActor))
+	{
+		if (UCameraComponent* CameraComponent = InspectionCamera->GetCameraComponent())
+		{
+			CameraComponent->SetProjectionMode(bUseFlatFrontInspectionCamera
+				? ECameraProjectionMode::Orthographic
+				: ECameraProjectionMode::Perspective);
+			if (bUseFlatFrontInspectionCamera)
+			{
+				CameraComponent->SetOrthoWidth(RuntimeCameraOrthoWidth);
+			}
+		}
+	}
+}
+
+void AChapter1GameMode::EnsureRuntimeInspectionBackdrop()
+{
+	if (!bSpawnRuntimeInspectionBackdrop || RuntimeInspectionBackdropActors.Num() > 0)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!CubeMesh)
+	{
+		return;
+	}
+
+	auto SpawnBlock = [this, World, CubeMesh](const FVector& Location, const FVector& Scale, const FVector& Tint)
+	{
+		AStaticMeshActor* Block = World->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator);
+		if (!Block)
+		{
+			return;
+		}
+
+#if WITH_EDITOR
+		Block->SetActorLabel(TEXT("Runtime_Ch1_InspectionBackdrop"));
+#endif
+		Block->SetMobility(EComponentMobility::Movable);
+		if (UStaticMeshComponent* MC = Block->GetStaticMeshComponent())
+		{
+			MC->SetStaticMesh(CubeMesh);
+			MC->SetRelativeScale3D(Scale);
+			MC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			if (UMaterialInterface* BaseMaterial = MC->GetMaterial(0))
+			{
+				UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMaterial, this);
+				if (MID)
+				{
+					MID->SetVectorParameterValue(TEXT("Color"), Tint);
+					MID->SetVectorParameterValue(TEXT("BaseColor"), Tint);
+					MC->SetMaterial(0, MID);
+				}
+			}
+		}
+		RuntimeInspectionBackdropActors.Add(Block);
+	};
+
+	// The flat Ch1 camera looks along +X. These blocks sit behind the doll and below the frame,
+	// restoring an Edith-Finch-like inspection nook without reintroducing a tilted camera.
+	SpawnBlock(FVector(260.0f, 0.0f, 170.0f), FVector(0.10f, 8.4f, 3.8f), FVector(0.18f, 0.16f, 0.14f));
+	SpawnBlock(FVector(70.0f, 0.0f, 20.0f), FVector(3.2f, 8.4f, 0.24f), FVector(0.24f, 0.20f, 0.16f));
 }
 
 void AChapter1GameMode::Tick(float DeltaSeconds)

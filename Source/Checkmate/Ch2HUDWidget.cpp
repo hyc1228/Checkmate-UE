@@ -99,29 +99,59 @@ void UCh2HUDWidget::SetMoveCounter(int32 Current, int32 Budget)
 
 void UCh2HUDWidget::SetMoveCounterVisible(bool bVisible)
 {
+	bMoveCounterRequestedVisible = bVisible;
 	if (MoveCounterText)
 	{
-		MoveCounterText->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		MoveCounterText->SetVisibility((bVisible && !bMinimalHUDMode) ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+}
+
+void UCh2HUDWidget::SetMinimalHUDMode(bool bMinimal)
+{
+	bMinimalHUDMode = bMinimal;
+	if (ModeText)
+	{
+		ModeText->SetVisibility(bMinimal ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	if (HintText)
+	{
+		HintText->SetVisibility(bMinimal ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	if (MoveCounterText)
+	{
+		MoveCounterText->SetVisibility((!bMinimal && bMoveCounterRequestedVisible) ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 }
 
 void UCh2HUDWidget::SetMode(ECh2Mode NewMode)
 {
 	if (!ModeText) return;
+	if (bMinimalHUDMode)
+	{
+		ModeText->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	ModeText->SetVisibility(ESlateVisibility::Visible);
 	ModePulseElapsed = 0.0f;
 	const FString JuicyModeName = (NewMode == ECh2Mode::Clown) ? TEXT("CLOWN / L-JUMP") : TEXT("BALLET / SLIDE");
 	ModeText->SetText(FText::FromString(JuicyModeName));
 	ModeText->SetColorAndOpacity(FSlateColor(NewMode == ECh2Mode::Clown
 		? FLinearColor(1.0f, 0.78f, 0.22f, 1.0f)
 		: FLinearColor(0.72f, 0.94f, 1.0f, 1.0f)));
-	const FString Name = (NewMode == ECh2Mode::Clown) ? TEXT("小丑 (knight L-跳)") : TEXT("芭蕾 (直线滑到墙)");
-	ModeText->SetText(FText::FromString(FString::Printf(TEXT("当前角色：%s"), *Name)));
 }
 
 void UCh2HUDWidget::SetHintMessage(const FString& Hint)
 {
 	if (HintText)
 	{
+		if (bMinimalHUDMode)
+		{
+			HintText->SetVisibility(ESlateVisibility::Collapsed);
+			return;
+		}
+
+		HintText->SetVisibility(ESlateVisibility::Visible);
 		HintPulseElapsed = 0.0f;
 		HintText->SetText(FText::FromString(Hint));
 	}

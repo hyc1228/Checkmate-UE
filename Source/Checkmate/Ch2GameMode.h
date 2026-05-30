@@ -197,6 +197,17 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Presentation", meta=(ClampMin="0.0"))
 	float BeatPostProcessPeak = 0.72f;
 
+	/** Keep Ch2 PV-first by default: use board/post-process feedback, with text panels opt-in for debug or demo builds. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Presentation")
+	bool bShowTextBeatPanels = false;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Presentation")
+	bool bUseMinimalHUD = true;
+
+	/** Lightweight environment mark for the PV gold-path pause cell until final art/decal assets are dropped in. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Presentation")
+	bool bSpawnTraceDecalFallback = true;
+
 	UFUNCTION(BlueprintCallable, Category="Ch2")
 	void RefreshHighlights();
 
@@ -299,6 +310,8 @@ protected:
 	void TriggerCameraKick(float Magnitude, float Duration);
 	void SpawnCellPulse(FIntPoint Cell, const FVector& Color, float RadiusScale = 2.2f, float LifeSpan = 0.35f);
 	void SpawnJuiceMarker(const FVector& WorldPos, const FVector& Color, float UniformScale, float LifeSpan, bool bSphere = true);
+	void SpawnTraceDecalFallback();
+	void SpawnJiangDebrisBurst(FIntPoint Cell);
 	void ResetFloorColorsToBoardPattern();
 	void ShowBeatPanel(ECh2BeatPanelMoment Moment, float HoldSeconds = -1.0f);
 	FCh2BeatPanelPayload BuildBeatPanelPayload(ECh2BeatPanelMoment Moment) const;

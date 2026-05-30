@@ -40,9 +40,35 @@ ACh2Pawn::ACh2Pawn()
 void ACh2Pawn::BeginPlay()
 {
 	Super::BeginPlay();
+	bIsStatueForm = bStartAsStatue;
 	SetMode(CurrentMode);  // 应用初始 tint
+	SetEyeStyle(EButtonEyeStyle::Standard);
 	// Ch2 玩家默认机械眼（spec 锁定）
 	SetEyeStyle(EButtonEyeStyle::Standard);
+}
+
+void ACh2Pawn::ApplyBodyTint(const FVector& Tint)
+{
+	if (!BodyMesh)
+	{
+		return;
+	}
+
+	BodyMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), Tint);
+	BodyMesh->SetVectorParameterValueOnMaterials(TEXT("BaseColor"), Tint);
+	BodyMesh->SetScalarParameterValueOnMaterials(TEXT("Intensity"), bIsStatueForm ? 0.55f : 1.15f);
+}
+
+void ACh2Pawn::RevealHumanForm()
+{
+	if (!bIsStatueForm && bVictoryColorizeActive)
+	{
+		return;
+	}
+
+	bVictoryColorizeActive = true;
+	VictoryColorizeElapsed = 0.0f;
+	bIsStatueForm = false;
 }
 
 void ACh2Pawn::SetEyeStyle(EButtonEyeStyle NewStyle)
@@ -73,13 +99,10 @@ void ACh2Pawn::SetMode(ECh2Mode NewMode)
 {
 	CurrentMode = NewMode;
 	ModePulseElapsed = 0.0f;
-	if (BodyMesh)
-	{
-		const FVector Tint = (NewMode == ECh2Mode::Clown)
-			? FVector(0.95f, 0.75f, 0.2f)
-			: FVector(0.92f, 0.92f, 0.98f);
-		BodyMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), Tint);
-	}
+	const FVector ModeTint = (NewMode == ECh2Mode::Clown)
+		? FVector(0.95f, 0.75f, 0.2f)
+		: FVector(0.92f, 0.92f, 0.98f);
+	ApplyBodyTint(bIsStatueForm ? StatueTint : ModeTint);
 	if (EyeMarker)
 	{
 		// 机械眼 cyan—两种模式都是 Ch2 玩家，眼睛都是机械眼
@@ -229,6 +252,25 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
 	if (!PC) return;
 
+	if (bVictoryColorizeActive)
+	{
+		VictoryColorizeElapsed += DeltaSeconds;
+		const float T = FMath::Clamp(VictoryColorizeElapsed / FMath::Max(0.05f, VictoryColorizeDuration), 0.0f, 1.0f);
+		const float EasedColor = FMath::InterpEaseOut(0.0f, 1.0f, T, 2.6f);
+		ApplyBodyTint(FMath::Lerp(StatueTint, HumanTint, EasedColor));
+		if (EyeMarker)
+		{
+			const FVector EyeColor = FMath::Lerp(FVector(0.2f, 0.95f, 1.4f), FVector(1.0f, 0.82f, 0.55f), EasedColor);
+			EyeMarker->SetVectorParameterValueOnMaterials(TEXT("Color"), EyeColor);
+			EyeMarker->SetVectorParameterValueOnMaterials(TEXT("Emissive Color"), EyeColor);
+			EyeMarker->SetRelativeScale3D(FVector(0.25f * (1.0f + FMath::Sin(T * PI) * 0.65f)));
+		}
+		if (T >= 1.0f)
+		{
+			bVictoryColorizeActive = false;
+		}
+	}
+
 	// 1) Lerp 中：推进动画，结束时触发 Notify
 	if (bMoving)
 	{
@@ -253,22 +295,25 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 		}
 		MoveElapsed += DeltaSeconds;
 		const float T = FMath::Clamp(MoveElapsed / EffectiveDuration, 0.0f, 1.0f);
-		const float Eased = FMath::InterpEaseOut(0.0f, 1.0f, T, 2.0f);
+		const float Eased = bIsStatueForm
+			? FMath::InterpEaseInOut(0.0f, 1.0f, T, 2.35f)
+			: FMath::InterpEaseOut(0.0f, 1.0f, T, 2.0f);
 		// 加一点 hop 弧线（中间略抬起）
 		FVector L = FMath::Lerp(MoveStartLoc, MoveEndLoc, Eased);
 		const float Arc = FMath::Sin(T * PI);
 		const float HopHeight = bPendingClownMove ? ClownHopHeight : MoveHopHeight;
-		L.Z += Arc * HopHeight;
+		L.Z += Arc * HopHeight * (bIsStatueForm && !bPendingClownMove ? 0.22f : 1.0f);
 		SetActorLocation(L);
 
 		if (BodyMesh)
 		{
 			const FVector MoveDir = (MoveEndLoc - MoveStartLoc).GetSafeNormal2D();
-			const float Squash = Arc * MoveSquashAmount;
+			const float Squash = bIsStatueForm ? 0.0f : Arc * MoveSquashAmount;
+			const float StatueSettle = bIsStatueForm ? FMath::Pow(FMath::Clamp(T, 0.0f, 1.0f), 7.0f) * 0.08f : 0.0f;
 			BodyMesh->SetRelativeScale3D(FVector(
-				0.6f + Squash * 0.35f,
-				0.6f + Squash * 0.35f,
-				1.0f - Squash));
+				0.6f + Squash * 0.35f + StatueSettle,
+				0.6f + Squash * 0.35f + StatueSettle,
+				1.0f - Squash - StatueSettle * 0.45f));
 			BodyMesh->SetRelativeRotation(FRotator(
 				-MoveDir.X * MoveLeanDegrees * Arc,
 				0.0f,
@@ -307,7 +352,7 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 		static float IdleElapsed = 0.0f;
 		IdleElapsed += DeltaSeconds;
 		ModePulseElapsed += DeltaSeconds;
-		const float Bob = FMath::Sin(IdleElapsed * 2.5f) * 4.0f;
+		const float Bob = bIsStatueForm ? 0.0f : FMath::Sin(IdleElapsed * 2.5f) * 4.0f;
 		const float ModePulse = ModePulseElapsed < 0.35f
 			? FMath::Sin((ModePulseElapsed / 0.35f) * PI) * 0.18f
 			: 0.0f;
@@ -316,12 +361,15 @@ void ACh2Pawn::Tick(float DeltaSeconds)
 			FVector RelLoc = BodyMesh->GetRelativeLocation();
 			RelLoc.Z = Bob;
 			BodyMesh->SetRelativeLocation(RelLoc);
-			BodyMesh->SetRelativeScale3D(FVector(0.6f + ModePulse, 0.6f + ModePulse, 1.0f + ModePulse * 0.5f));
+			const float StatuePulse = bIsStatueForm ? ModePulse * 0.25f : ModePulse;
+			BodyMesh->SetRelativeScale3D(FVector(0.6f + StatuePulse, 0.6f + StatuePulse, 1.0f + StatuePulse * 0.5f));
 			BodyMesh->SetRelativeRotation(FRotator::ZeroRotator);
 		}
 		if (EyeMarker)
 		{
-			const float EyePulse = 1.0f + ModePulse * 1.2f + FMath::Max(0.0f, FMath::Sin(IdleElapsed * 5.0f)) * 0.06f;
+			const float EyePulse = bIsStatueForm
+				? 1.0f + ModePulse * 0.25f
+				: 1.0f + ModePulse * 1.2f + FMath::Max(0.0f, FMath::Sin(IdleElapsed * 5.0f)) * 0.06f;
 			EyeMarker->SetRelativeScale3D(FVector(0.25f * EyePulse));
 		}
 	}

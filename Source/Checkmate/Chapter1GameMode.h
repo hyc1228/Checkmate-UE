@@ -130,11 +130,21 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera")
 	bool bOverrideInspectionCameraTransform = true;
 
+	/** Ch1 inspection should read like a front-facing inspection desk, not an angled board camera. */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera", meta=(EditCondition="bOverrideInspectionCameraTransform"))
-	FVector RuntimeCameraLocation = FVector(-520.0f, -320.0f, 430.0f);
+	bool bUseFlatFrontInspectionCamera = true;
 
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera", meta=(EditCondition="bOverrideInspectionCameraTransform"))
-	FVector RuntimeCameraLookAt = FVector(0.0f, 0.0f, 140.0f);
+	FVector RuntimeCameraLocation = FVector(-850.0f, 0.0f, 155.0f);
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera", meta=(EditCondition="bOverrideInspectionCameraTransform"))
+	FVector RuntimeCameraLookAt = FVector(0.0f, 0.0f, 155.0f);
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera", meta=(EditCondition="bOverrideInspectionCameraTransform", ClampMin="100.0"))
+	float RuntimeCameraOrthoWidth = 720.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera")
+	bool bSpawnRuntimeInspectionBackdrop = true;
 
 	/** 本地化字典 asset（拖 DA_Ch1Loc 进来）。BeginPlay 注入到 UCh1LocSubsystem。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
@@ -248,6 +258,7 @@ private:
 	void PlayTwistOpticalBurnout();
 	void SetUIInputMode();
 	void ApplyRuntimeCameraFraming(AActor* CameraActor) const;
+	void EnsureRuntimeInspectionBackdrop();
 	FCh1ProgressPanelPayload BuildProgressPanelPayload(int32 ShiftIdx, ECh1ProgressPanelMoment Moment) const;
 	void StartProgressPanelPostProcessCue(bool bMajorBeat);
 	void UpdateProgressPanelPostProcessCue(float DeltaSeconds);
@@ -259,6 +270,9 @@ private:
 
 	UPROPERTY()
 	APostProcessVolume* ProgressPanelPostProcessVolume = nullptr;
+
+	UPROPERTY()
+	TArray<AActor*> RuntimeInspectionBackdropActors;
 
 	float ProgressPanelPostProcessElapsed = 0.0f;
 	bool bProgressPanelPostProcessActive = false;

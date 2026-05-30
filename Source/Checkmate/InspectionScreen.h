@@ -197,6 +197,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|PostProcess", meta=(ClampMin="0.0", ClampMax="2.0"))
 	float WrongPostProcessPeak = 1.0f;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|PostProcess")
+	FLinearColor CorrectPostProcessTint = FLinearColor(0.08f, 1.0f, 0.22f, 1.0f);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|PostProcess")
+	FLinearColor WrongPostProcessTint = FLinearColor(1.0f, 0.05f, 0.04f, 1.0f);
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Feedback|Audio")
 	FName CorrectVerdictCue = TEXT("Ch1.Correct");
 
@@ -310,6 +316,7 @@ private:
 	int32 TrueRejectCount = 0;
 	bool bAwaitingNext = false;
 	bool bShiftEnded = false;
+	bool bQuotaFallbackLogged = false;
 	FTimerHandle ShiftEndTimer;
 
 	// 误判统计 + 文案漂移 state
@@ -434,6 +441,7 @@ private:
 
 	/** 立即检查本班是否该终止（成功/失败）。返回 true 表示已 schedule 终止 broadcast。 */
 	bool CheckShiftTermination();
+	bool IsQuotaPossibleWithCurrentCriteria() const;
 
 	void RefreshLocalizedTexts();
 	UCh1LocSubsystem* GetLoc() const;
