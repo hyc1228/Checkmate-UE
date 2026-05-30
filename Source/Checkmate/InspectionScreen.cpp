@@ -66,7 +66,6 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	bHasDriftedFalseNeg = false;
 	bAwaitingNext = false;
 	bShiftEnded = false;
-	OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
 	OpticalEdgeOpacityT = OpticalTargetEdgeOpacityT = OpticalBaseOpacity;
 	OpticalEdgeRadiusT = OpticalTargetEdgeRadiusT = 0.0f;
 	OpticalPulseT = OpticalTargetPulseT = 0.0f;
@@ -74,7 +73,6 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	OpticalBurnoutT = OpticalTargetBurnoutT = 0.0f;
 	OpticalMechanicalFadeT = OpticalTargetMechanicalFadeT = 0.0f;
 	OpticalSurgeRemainingSec = 0.0f;
-	OpticalSurgeTotalSec = 0.0f;
 	OpticalBurnoutRemainingSec = 0.0f;
 	OpticalBurnoutTotalSec = 0.0f;
 	OpticalFadeRemainingSec = 0.0f;
@@ -497,7 +495,6 @@ void UInspectionScreen::ApplyMisjudgmentPressure()
 	// 累积压力：vignette / chromatic / desaturation 渐进，5 次封顶。
 	// PP material 存在时额外推 EdgeOpacityT；不存在时这些内置 PP 仍可作为可见 fallback。
 	const float Pressure = FMath::Clamp(MisjudgmentCount / 5.0f, 0.0f, 1.0f);
-	OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
 	OpticalTargetEdgeOpacityT = ComputeOpticalEdgeOpacityFromMisjudgments();
 	OpticalTargetEdgeRadiusT = FMath::Lerp(0.0f, 0.12f, Pressure);
 	OpticalTargetPulseT = FMath::Lerp(0.05f, 0.35f, Pressure);
@@ -526,9 +523,7 @@ void UInspectionScreen::ApplyMisjudgmentPressure()
 void UInspectionScreen::TriggerOpticalInversionSurge(float DurationSec)
 {
 	EnsureOpticalInversionPostProcess();
-	OpticalInversionMode = ECh1OpticalInversionMode::SurgeInversion;
-	OpticalSurgeTotalSec = FMath::Max(0.05f, DurationSec);
-	OpticalSurgeRemainingSec = OpticalSurgeTotalSec;
+	OpticalSurgeRemainingSec = FMath::Max(0.05f, DurationSec);
 
 	OpticalTargetEdgeOpacityT = 1.0f;
 	OpticalTargetEdgeRadiusT = SurgeEdgeRadius;
@@ -550,7 +545,6 @@ void UInspectionScreen::TriggerOpticalInversionSurge(float DurationSec)
 void UInspectionScreen::PlayTwistOpticalInversionBurnout(float DurationSec)
 {
 	EnsureOpticalInversionPostProcess();
-	OpticalInversionMode = ECh1OpticalInversionMode::TwistBurnout;
 	OpticalBurnoutTotalSec = FMath::Max(0.05f, DurationSec);
 	OpticalBurnoutRemainingSec = OpticalBurnoutTotalSec;
 
@@ -636,9 +630,8 @@ void UInspectionScreen::UpdateOpticalInversion(float DeltaSeconds)
 	if (OpticalSurgeRemainingSec > 0.0f)
 	{
 		OpticalSurgeRemainingSec -= DeltaSeconds;
-		if (OpticalSurgeRemainingSec <= 0.0f && OpticalInversionMode == ECh1OpticalInversionMode::SurgeInversion)
+		if (OpticalSurgeRemainingSec <= 0.0f)
 		{
-			OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
 			OpticalTargetEdgeOpacityT = ComputeOpticalEdgeOpacityFromMisjudgments();
 			OpticalTargetEdgeRadiusT = 0.0f;
 			OpticalTargetPulseT = 0.15f;
@@ -686,7 +679,6 @@ void UInspectionScreen::PushOpticalInversionParameters()
 	OpticalInversionMID->SetScalarParameterValue(TEXT("InvertT"), OpticalInvertT);
 	OpticalInversionMID->SetScalarParameterValue(TEXT("BurnoutT"), OpticalBurnoutT);
 	OpticalInversionMID->SetScalarParameterValue(TEXT("MechanicalFadeT"), OpticalMechanicalFadeT);
-	OpticalInversionMID->SetScalarParameterValue(TEXT("ModeT"), static_cast<float>(OpticalInversionMode));
 }
 
 float UInspectionScreen::ComputeOpticalEdgeOpacityFromMisjudgments() const

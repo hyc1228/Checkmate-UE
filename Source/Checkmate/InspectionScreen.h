@@ -17,14 +17,6 @@ class APostProcessVolume;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 
-UENUM(BlueprintType)
-enum class ECh1OpticalInversionMode : uint8
-{
-	AmbientButtonEdge UMETA(DisplayName="Ambient Button Edge"),
-	SurgeInversion UMETA(DisplayName="Surge Inversion"),
-	TwistBurnout UMETA(DisplayName="Twist Burnout")
-};
-
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
  */
@@ -191,9 +183,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Inspection|Optical Inversion", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float BurnoutInvertPeak = 0.40f;
 
-	UPROPERTY(BlueprintReadOnly, Category="Inspection|Optical Inversion")
-	ECh1OpticalInversionMode OpticalInversionMode = ECh1OpticalInversionMode::AmbientButtonEdge;
-
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
@@ -290,7 +279,6 @@ private:
 	float OpticalTargetMechanicalFadeT = 0.0f;
 
 	float OpticalSurgeRemainingSec = 0.0f;
-	float OpticalSurgeTotalSec = 0.0f;
 	float OpticalBurnoutRemainingSec = 0.0f;
 	float OpticalBurnoutTotalSec = 0.0f;
 	float OpticalFadeRemainingSec = 0.0f;
