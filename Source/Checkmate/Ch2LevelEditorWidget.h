@@ -86,6 +86,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UButton* BrushBtn_Start = nullptr;
 
+	// 婚纱残骸 brush（v0.1 新增）。BindWidgetOptional：旧 WBP 没这按钮时不报错。
+	UPROPERTY(BlueprintReadOnly, meta=(BindWidgetOptional), Category="UMG Binding")
+	UButton* BrushBtn_WeddingWreckage = nullptr;
+
 	UPROPERTY(BlueprintReadOnly, meta=(BindWidget), Category="UMG Binding")
 	UTextBlock* BrushLabel = nullptr;
 
@@ -101,6 +105,7 @@ protected:
 	UFUNCTION() void OnBrushPickupClicked();
 	UFUNCTION() void OnBrushExitClicked();
 	UFUNCTION() void OnBrushStartClicked();
+	UFUNCTION() void OnBrushWeddingWreckageClicked();
 	UFUNCTION() void OnSaveClicked();
 
 private:

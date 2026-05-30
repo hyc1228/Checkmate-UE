@@ -146,6 +146,10 @@ public:
 	UFUNCTION(Exec)
 	void PV_SetSequencerBakeActive(bool bActive = true);
 
+	/** PV recording override: keep the design asset strict while allowing long capture runs. */
+	UFUNCTION(Exec)
+	void PV_SetMoveBudget(int32 MoveBudget = 99);
+
 	/** 爆炸 camera shake 振幅（unit）+ 时长（秒）。直接由 Tick 实现。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch2|Feel", meta=(ClampMin="0"))
 	float ExplosionShakeMagnitude = 12.0f;
@@ -239,9 +243,15 @@ protected:
 	UPROPERTY()
 	TArray<FCh2PuppetState> Puppets;
 
+	/** 婚纱铃场：已响过的 cell（避免循环触发，"接不上的铃"每格只响一次）。 */
+	TSet<FIntPoint> BellRungAtCells;
+
+	int32 RuntimeMoveBudgetOverride = INDEX_NONE;
+
 	void SpawnPuppetAt(FIntPoint Cell);
 	void TickPuppets();
 	void ExplodePuppet(int32 PuppetIdx);
+	int32 GetEffectiveMoveBudget() const;
 	void RefreshPuppetVisual(FCh2PuppetState& P);
 	void UpdateHoverMarker();
 	void UpdatePathPreview(FIntPoint HoverCell, bool bValid);

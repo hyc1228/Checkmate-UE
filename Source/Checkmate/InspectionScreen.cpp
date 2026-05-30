@@ -466,9 +466,19 @@ bool UInspectionScreen::CheckShiftTermination()
 	}
 
 	// 成功
-	const bool bDone = bUseQuota
+	bool bDone = bUseQuota
 		? (TrueAcceptCount >= PassQuota && TrueRejectCount >= RejectQuota)
 		: (CorrectCount >= CorrectGoal);
+
+	// 教学班宽容机制：MaxMisjudgmentsBeforeFail >= 50（=不让失败的"教学"配置）时，
+	// 累计 CorrectCount >= max(2, CorrectGoal) 也算过班（绕开"必须放行 + 必须丢弃"的硬卡死）
+	if (!bDone && MaxMisjudgmentsBeforeFail >= 50 && CorrectCount >= FMath::Max(2, CorrectGoal))
+	{
+		bDone = true;
+		UE_LOG(LogTemp, Display, TEXT("[InspectionScreen] 教学班宽容机制触发：%d 次正确 (goal=%d)"),
+			CorrectCount, CorrectGoal);
+	}
+
 	if (bDone)
 	{
 		bShiftEnded = true;

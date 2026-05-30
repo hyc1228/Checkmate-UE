@@ -20,6 +20,7 @@ void UCh2LevelEditorWidget::NativeConstruct()
 	if (BrushBtn_Pickup)       BrushBtn_Pickup->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnBrushPickupClicked);
 	if (BrushBtn_Exit)         BrushBtn_Exit->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnBrushExitClicked);
 	if (BrushBtn_Start)        BrushBtn_Start->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnBrushStartClicked);
+	if (BrushBtn_WeddingWreckage) BrushBtn_WeddingWreckage->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnBrushWeddingWreckageClicked);
 	if (SaveButton)            SaveButton->OnClicked.AddDynamic(this, &UCh2LevelEditorWidget::OnSaveClicked);
 
 	SetBrush(ECh2CellType::Wall);
@@ -165,6 +166,7 @@ void UCh2LevelEditorWidget::OnBrushDestructibleClicked() { SetBrush(ECh2CellType
 void UCh2LevelEditorWidget::OnBrushPickupClicked()       { SetBrush(ECh2CellType::ClownPickup); }
 void UCh2LevelEditorWidget::OnBrushExitClicked()         { SetBrush(ECh2CellType::Exit); }
 void UCh2LevelEditorWidget::OnBrushStartClicked()        { SetBrush(ECh2CellType::Start); }
+void UCh2LevelEditorWidget::OnBrushWeddingWreckageClicked() { SetBrush(ECh2CellType::WeddingWreckage); }
 
 void UCh2LevelEditorWidget::OnSaveClicked()
 {

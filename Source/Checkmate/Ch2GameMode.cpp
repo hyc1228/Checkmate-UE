@@ -11,6 +11,7 @@
 #include "Camera/CameraComponent.h"
 #include "Camera/CameraShakeBase.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/TextRenderComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
@@ -61,9 +62,26 @@ void ACh2GameMode::PV_SetSequencerBakeActive(bool bActive)
 #endif
 }
 
+void ACh2GameMode::PV_SetMoveBudget(int32 MoveBudget)
+{
+#if UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Warning, TEXT("PV_CH2_MOVE_BUDGET ignored in shipping build Requested=%d"), MoveBudget);
+#else
+	RuntimeMoveBudgetOverride = MoveBudget > 0 ? MoveBudget : INDEX_NONE;
+	UE_LOG(LogTemp, Display, TEXT("PV_CH2_MOVE_BUDGET Effective=%d Source=%s"),
+		GetEffectiveMoveBudget(),
+		RuntimeMoveBudgetOverride > 0 ? TEXT("RuntimeOverride") : TEXT("LevelData"));
+	if (HUDWidget)
+	{
+		HUDWidget->SetMoveCounter(MoveCount, GetEffectiveMoveBudget());
+	}
+#endif
+}
+
 void ACh2GameMode::BeginPlay()
 {
 	Super::BeginPlay();
+	BellRungAtCells.Reset();
 
 	if (!LevelData)
 	{
@@ -77,7 +95,7 @@ void ACh2GameMode::BeginPlay()
 	}
 
 	UE_LOG(LogTemp, Display, TEXT("PV_CH2_CONFIG MoveBudget=%d PuppetExplodeAfterTurns=%d BakeMode=%s"),
-		LevelData->MoveBudget,
+		GetEffectiveMoveBudget(),
 		PuppetExplodeAfterTurns,
 		bPVSequencerBakeActive ? TEXT("true") : TEXT("false"));
 
@@ -110,6 +128,15 @@ bool ACh2GameMode::IsInBounds(FIntPoint Cell) const
 int32 ACh2GameMode::GetGridWidth() const  { return LevelData ? LevelData->GridWidth  : 0; }
 int32 ACh2GameMode::GetGridHeight() const { return LevelData ? LevelData->GridHeight : 0; }
 float ACh2GameMode::GetCellSize() const   { return LevelData ? LevelData->CellSize   : 200.0f; }
+
+int32 ACh2GameMode::GetEffectiveMoveBudget() const
+{
+	if (RuntimeMoveBudgetOverride > 0)
+	{
+		return RuntimeMoveBudgetOverride;
+	}
+	return LevelData ? LevelData->MoveBudget : 0;
+}
 
 void ACh2GameMode::BuildLevel()
 {
@@ -213,6 +240,22 @@ void ACh2GameMode::BuildLevel()
 		DecoMC->SetStaticMesh(DecoMesh);
 		DecoMC->SetRelativeScale3D(DecoScale);
 		DecoMC->SetVectorParameterValueOnMaterials(TEXT("Color"), TintColor);
+		if (Type == ECh2CellType::Destructible)
+		{
+			UTextRenderComponent* JiangLabel = NewObject<UTextRenderComponent>(DecoActor);
+			if (JiangLabel)
+			{
+				JiangLabel->SetupAttachment(DecoActor->GetRootComponent());
+				JiangLabel->RegisterComponent();
+				JiangLabel->SetText(FText::FromString(TEXT("将")));
+				JiangLabel->SetHorizontalAlignment(EHTA_Center);
+				JiangLabel->SetVerticalAlignment(EVRTA_TextCenter);
+				JiangLabel->SetWorldSize(CS * 0.32f);
+				JiangLabel->SetTextRenderColor(FColor(248, 248, 250));
+				JiangLabel->SetRelativeLocation(FVector(0.0f, 0.0f, CS * 0.45f));
+				JiangLabel->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
+			}
+		}
 		CellActors.Add(C, DecoActor);
 	}
 
@@ -500,8 +543,9 @@ void ACh2GameMode::NotifyPawnMoved(FIntPoint FromCell, FIntPoint ToCell, bool bW
 
 	// 步数预算检查（关卡 MoveBudget > 0 时启用）
 	MoveCount++;
-	if (HUDWidget) HUDWidget->SetMoveCounter(MoveCount, LevelData ? LevelData->MoveBudget : 0);
-	if (LevelData && LevelData->MoveBudget > 0 && MoveCount > LevelData->MoveBudget)
+	const int32 EffectiveMoveBudget = GetEffectiveMoveBudget();
+	if (HUDWidget) HUDWidget->SetMoveCounter(MoveCount, EffectiveMoveBudget);
+	if (EffectiveMoveBudget > 0 && MoveCount > EffectiveMoveBudget)
 	{
 		// 短延迟后重启（让玩家看清楚最后一步落点）
 		FTimerHandle FailTimer;
@@ -760,6 +804,8 @@ void ACh2GameMode::SpawnPuppetAt(FIntPoint Cell)
 	P.TurnsRemaining = PuppetExplodeAfterTurns;
 	P.RuntimeActor = A;
 	Puppets.Add(P);
+	UE_LOG(LogTemp, Display, TEXT("CH2_PUPPET_SPAWN Cell=(%d,%d) TurnsRemaining=%d ActivePuppets=%d"),
+		Cell.X, Cell.Y, P.TurnsRemaining, Puppets.Num());
 
 	UE_LOG(LogTemp, Display, TEXT("Ch2: 爆炸玩偶 spawn @ (%d,%d), %d 回合后爆炸"),
 		Cell.X, Cell.Y, P.TurnsRemaining);
@@ -774,6 +820,12 @@ void ACh2GameMode::TickPuppets()
 		if (Puppets[i].TurnsRemaining <= 0)
 		{
 			ExplodePuppet(i);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Display, TEXT("CH2_PUPPET_TICK Cell=(%d,%d) TurnsRemaining=%d"),
+				Puppets[i].Cell.X, Puppets[i].Cell.Y, Puppets[i].TurnsRemaining);
+			UAudioService::PlayCueStatic(this, FName("Ch2.PuppetTick"), 0.7f);
 		}
 	}
 }
@@ -799,6 +851,7 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 	if (!Puppets.IsValidIndex(PuppetIdx) || !LevelData) return;
 	FCh2PuppetState& P = Puppets[PuppetIdx];
 
+	UE_LOG(LogTemp, Display, TEXT("CH2_PUPPET_BOOM Cell=(%d,%d)"), P.Cell.X, P.Cell.Y);
 	UE_LOG(LogTemp, Display, TEXT("Ch2: 爆炸玩偶 BOOM @ (%d,%d)"), P.Cell.X, P.Cell.Y);
 
 	UAudioService::PlayCueStatic(this, FName("Ch2.Explode"));
@@ -842,6 +895,8 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 				if (*Found) (*Found)->Destroy();
 				CellActors.Remove(N);
 			}
+			UE_LOG(LogTemp, Display, TEXT("CH2_DESTRUCTIBLE_REMOVED Cell=(%d,%d) TriggerPuppet=(%d,%d)"),
+				N.X, N.Y, P.Cell.X, P.Cell.Y);
 			UE_LOG(LogTemp, Display, TEXT("Ch2:   炸开 (%d,%d)"), N.X, N.Y);
 		}
 	}
@@ -857,6 +912,24 @@ void ACh2GameMode::ExplodePuppet(int32 PuppetIdx)
 void ACh2GameMode::NotifyPawnEnteredCell(FIntPoint Cell)
 {
 	if (!LevelData) return;
+
+	// 婚纱铃场：玩家停在 WeddingWreckage 4-邻格时响一次（每格仅一次）。
+	// spec ch2-slice-space.md §5 锚点 1：接不上的铃 = 一响即止。
+	if (!BellRungAtCells.Contains(Cell))
+	{
+		const FIntPoint NDirs[4] = { {1,0}, {-1,0}, {0,1}, {0,-1} };
+		for (const FIntPoint& D : NDirs)
+		{
+			if (GetCellType(FIntPoint(Cell.X + D.X, Cell.Y + D.Y)) == ECh2CellType::WeddingWreckage)
+			{
+				UE_LOG(LogTemp, Display, TEXT("SC_Ch2.Bell Cell=(%d,%d) WeddingNeighbor=(%d,%d)"),
+					Cell.X, Cell.Y, Cell.X + D.X, Cell.Y + D.Y);
+				UAudioService::PlayCueStatic(this, FName("Ch2.Bell"));
+				BellRungAtCells.Add(Cell);
+				break;
+			}
+		}
+	}
 
 	const ECh2CellType Type = GetCellType(Cell);
 

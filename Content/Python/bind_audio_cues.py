@@ -14,6 +14,7 @@ KEY_TO_ASSET = {
     "Ch1.Wrong":   "Ch1_Wrong",
     "Ch2.Move":    "Ch2_Move",
     "Ch2.Explode": "Ch2_Explode",
+    "Ch2.Bell":    "Ch2_Bell",
     "Ch2.Ritual":  "Ch2_Ritual",
     "Ch2.Victory": "Ch2_Victory",
     "UI.Click":    "UI_Click",
@@ -33,12 +34,12 @@ da = unreal.EditorAssetLibrary.load_asset(DA_PATH)
 if not da:
     unreal.log_error(f"无法加载 {DA_PATH}")
 else:
-    cues = {}
+    cues = dict(da.get_editor_property("native_cues") or {})
     for key, name in KEY_TO_ASSET.items():
         path = f"{PLACEHOLDER}{name}.{name}"
         sw = unreal.EditorAssetLibrary.load_asset(path)
         if sw is None:
-            unreal.log_warning(f"[miss] {path}")
+            unreal.log_warning(f"[miss] {path}; keeping existing binding for {key} if present")
             continue
         cues[unreal.Name(key)] = sw
 

@@ -212,6 +212,20 @@ const cues = [
     statusNote: "可用"
   },
   {
+    key: "Ch2.Bell",
+    category: "Ch2",
+    priority: "High",
+    codeHook: true,
+    placeholderReady: true,
+    needsReplacement: true,
+    fmodReady: false,
+    file: "Ch2_Bell.ogg",
+    currentSource: "temporary duplicate of Ch2_Ritual",
+    trigger: "Ch2GameMode::NotifyPawnEnteredCell / WeddingWreckage 4-neighbor",
+    target: "SC_Ch2.Bell: <=600ms hard-cut short bell, no reverb tail",
+    statusNote: "temporary placeholder"
+  },
+  {
     key: "Ch2.PuppetTick",
     category: "Ch2",
     priority: "Medium",
@@ -438,6 +452,7 @@ const fmodEvents = {
   "Ch2.Move": "event:/Ch2/Move",
   "Ch2.Explode": "event:/Ch2/Explode",
   "Ch2.Ritual": "event:/Ch2/Ritual",
+  "Ch2.Bell": "event:/Ch2/Bell",
   "Ch2.Victory": "event:/Ch2/Victory",
   "Ch2.PuppetTick": "event:/Ch2/PuppetTick",
   "Ch2.ModeBallet": "event:/Ch2/Move",

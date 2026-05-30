@@ -71,6 +71,7 @@
 | **`Ch1.Card.Deselect`** | 玩家反选 | 卡片回落，短反气泡声 | 低 |
 | **`Ch1.ConveyorIn`** | 娃娃从左侧传送带滑入 | 传送带"咔啦"启动 + 玩偶橡胶滑落 | 高（每只娃娃出场都该有） |
 | **`Ch1.TimeoutWarn`** | Shift 3/4 娃娃倒计时 <3s | 滴答加快、紧迫的提示 | 中（已有 Kenney Digital 占位） |
+| **`Ch2.Bell`** | WeddingWreckage 4-neighbor trigger | SC_Ch2.Bell: <=600ms hard-cut short bell, no reverb tail | High |
 | **`Ch2.PuppetTick`** | 爆炸玩偶倒计时每回合脉冲 | 心跳 / 滴答；玩家能听出"还有 N 回合" | 中（已有 Kenney Digital 占位） |
 | **`Ch2.ModeBallet`** | Ch2.Move 的 Ballet 变种 | 轻盈 + 滑步声 | 中 |
 | **`Ch2.ModeClown`** | Ch2.Move 的 Clown 变种 | 笨重 + 铃铛 / 双扣摇晃声 | 中 |
@@ -118,6 +119,10 @@ Master/Twist    PearlEye / MechanicalEye / 主拍点
 Master/Amb      Ch1Factory (param: Tension) / Ch2Empty
 Master/Music    MainMenu / Ch1Loop / Ch2Loop
 ```
+
+## PV Slice Note
+
+`Ch2.Bell` is now a live UE key for the WeddingWreckage 4-neighbor trigger. Current native placeholder is `/Game/Audio/Placeholder/Ch2_Bell`, duplicated from `Ch2_Ritual`; replace it with a <=600ms hard-cut short bell for final `SC_Ch2.Bell`.
 
 具体建 event 的 step 见 `docs/Audio-Spec.md §5`。
 

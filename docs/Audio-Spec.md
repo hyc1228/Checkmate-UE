@@ -38,6 +38,7 @@ Kenney CC0 公共领域包（已放到 `Content/Audio/Placeholder/*.ogg`）：
 | `Ch2_Move.ogg`     | impact/footstep_wood_001         | Ch2.Move      |
 | `Ch2_Explode.ogg`  | impact/impactWood_heavy_004      | Ch2.Explode   |
 | `Ch2_Ritual.ogg`   | interface/bong_001               | Ch2.Ritual    |
+| `Ch2_Bell.ogg`     | temp duplicate of Ch2_Ritual     | Ch2.Bell      |
 | `Ch2_Victory.ogg`  | interface/confirmation_004       | Ch2.Victory   |
 | `UI_Click.ogg`     | interface/click_001              | UI.Click      |
 | `UI_Hover.ogg`     | interface/click_005              | UI.Hover      |
@@ -91,6 +92,7 @@ py "D:/Unreal Projects/Checkmate/Content/Python/import_audio.py"
 | Ch2.Move      | `/Game/Audio/Placeholder/Ch2_Move`              |
 | Ch2.Explode   | `/Game/Audio/Placeholder/Ch2_Explode`           |
 | Ch2.Ritual    | `/Game/Audio/Placeholder/Ch2_Ritual`            |
+| Ch2.Bell      | `/Game/Audio/Placeholder/Ch2_Bell`              |
 | Ch2.Victory   | `/Game/Audio/Placeholder/Ch2_Victory`           |
 | UI.Click      | `/Game/Audio/Placeholder/UI_Click`              |
 | UI.Hover      | `/Game/Audio/Placeholder/UI_Hover`              |
@@ -177,6 +179,7 @@ Bank: UI
 | Ch1.ShiftPass | `event:/Ch1/ShiftPass` |
 | Ch1.ShiftFail | `event:/Ch1/ShiftFail` |
 | Ch1.TimeoutWarn | `event:/Ch1/TimeoutWarn` |
+| Ch2.Bell | `event:/Ch2/Bell` |
 | Ch2.PuppetTick | `event:/Ch2/PuppetTick` |
 
 `Build.cs` 已经 `PublicDefinitions.Add("WITH_FMOD_CHECKMATE=1")`，AudioService 会优先走 FMOD path；任何 key 在 `FmodEventPaths` 找不到就退回 NativeCues。
@@ -208,5 +211,9 @@ if (auto* GI = GetGameInstance())
 // 在世界位置
 Svc->PlayCueAtLocation(FName("Ch2.Explode"), ExplodeLoc);
 ```
+
+## PV Slice Note
+
+`Ch2.Bell` is bound to `/Game/Audio/Placeholder/Ch2_Bell` for the WeddingWreckage 4-neighbor trigger. This is a temporary duplicate of `Ch2_Ritual`; final asset should be `SC_Ch2.Bell`, <=600ms, hard-cut with no reverb tail.
 
 所有调用点都不需要知道是 FMOD 还是原生，Subsystem 内部分流。
