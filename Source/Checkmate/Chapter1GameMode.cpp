@@ -198,6 +198,7 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 	// 班次失败：回到当前班的选卡屏重试（不退回主菜单）
 	if (!Result.bSuccess)
 	{
+		UAudioService::PlayCueStatic(this, FName("Ch1.ShiftFail"));
 		UAudioService::PlayCueStatic(this, FName("Ch1.Wrong"));
 		// 短延迟后重启当班（让玩家看到 "班次失败" toast）
 		FTimerHandle RetryHandle;
@@ -211,6 +212,7 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 	const int32 NextIdx = CurrentShiftIdx + 1;
 	if (Shifts.IsValidIndex(NextIdx))
 	{
+		UAudioService::PlayCueStatic(this, FName("Ch1.ShiftPass"));
 		ShowShiftTransition(NextIdx);
 	}
 	else
@@ -279,8 +281,9 @@ void AChapter1GameMode::RequestTwist()
 
 	UE_LOG(LogTemp, Display, TEXT("Chapter1: ★ Twist triggered — Ch1→Ch2 翻转拍点"));
 
-	// 音频：钟铃 + 切换 ritual cue
-	UAudioService::PlayCueStatic(this, FName("Ch2.Ritual"));
+	// 音频：翻转专属 cue；没绑 Native/FMOD 时 AudioService 会静默 fallback。
+	UAudioService::PlayCueStatic(this, FName("Twist.DroneAscent"), 0.8f);
+	UAudioService::PlayCueStatic(this, FName("Twist.PearlEye"));
 
 	// Ch1 optical inversion：先让按扣边缘变实，再进入 EyeFall burnout。
 	if (ActiveInspectionScreen)
@@ -318,6 +321,7 @@ void AChapter1GameMode::RequestTwist()
 
 void AChapter1GameMode::PlayTwistOpticalBurnout()
 {
+	UAudioService::PlayCueStatic(this, FName("Twist.MechanicalEye"));
 	if (ActiveInspectionScreen)
 	{
 		ActiveInspectionScreen->PlayTwistOpticalInversionBurnout(TwistFadeSeconds);

@@ -44,6 +44,20 @@ Kenney CC0 公共领域包（已放到 `Content/Audio/Placeholder/*.ogg`）：
 
 来源：https://kenney.nl/assets/interface-sounds + https://kenney.nl/assets/impact-sounds（CC0）
 
+2026-05-30 新增 Kenney Digital Audio（CC0）候选包：
+
+| .ogg 文件 | 来源文件 | 建议 Key |
+|---|---|---|
+| `Twist_PearlEye.ogg` | digital-audio/spaceTrash1 | Twist.PearlEye |
+| `Twist_MechanicalEye.ogg` | digital-audio/phaserUp4 | Twist.MechanicalEye |
+| `Twist_DroneAscent.ogg` | digital-audio/lowThreeTone | Twist.DroneAscent |
+| `Ch1_ShiftPass.ogg` | digital-audio/twoTone1 | Ch1.ShiftPass |
+| `Ch1_ShiftFail.ogg` | digital-audio/lowDown | Ch1.ShiftFail |
+| `Ch1_TimeoutWarn.ogg` | digital-audio/highUp | Ch1.TimeoutWarn |
+| `Ch2_PuppetTick.ogg` | digital-audio/tone1 | Ch2.PuppetTick |
+
+完整源包保留在 `Content/Audio/SourcePacks/Kenney_DigitalAudio/`，包含 `License.txt`。来源：https://kenney.nl/assets/digital-audio（CC0）。
+
 环境 ambient（Amb.Ch1 / Amb.Ch2）暂未占位 — 推荐去 freesound.org 找 1-2min 工厂底噪 + 空旷大厅底噪，命名后丢同目录。
 
 ---
@@ -80,6 +94,13 @@ py "D:/Unreal Projects/Checkmate/Content/Python/import_audio.py"
 | Ch2.Victory   | `/Game/Audio/Placeholder/Ch2_Victory`           |
 | UI.Click      | `/Game/Audio/Placeholder/UI_Click`              |
 | UI.Hover      | `/Game/Audio/Placeholder/UI_Hover`              |
+| Twist.PearlEye | `/Game/Audio/Placeholder/Twist_PearlEye`       |
+| Twist.MechanicalEye | `/Game/Audio/Placeholder/Twist_MechanicalEye` |
+| Twist.DroneAscent | `/Game/Audio/Placeholder/Twist_DroneAscent` |
+| Ch1.ShiftPass | `/Game/Audio/Placeholder/Ch1_ShiftPass`        |
+| Ch1.ShiftFail | `/Game/Audio/Placeholder/Ch1_ShiftFail`        |
+| Ch1.TimeoutWarn | `/Game/Audio/Placeholder/Ch1_TimeoutWarn`    |
+| Ch2.PuppetTick | `/Game/Audio/Placeholder/Ch2_PuppetTick`      |
 
 保存。Subsystem 会在 GameInstance 启动时自动加载 `DA_AudioCues` —— 进游戏直接有声。
 
@@ -102,6 +123,9 @@ Bank: Ch1
   event:/Ch1/Toss         2D, oneshot, SFX
   event:/Ch1/Correct      2D, oneshot, SFX
   event:/Ch1/Wrong        2D, oneshot, SFX
+  event:/Ch1/ShiftPass    2D, oneshot, SFX
+  event:/Ch1/ShiftFail    2D, oneshot, SFX
+  event:/Ch1/TimeoutWarn  2D, oneshot, SFX
   event:/Amb/Ch1Factory   2D, looping, Amb（参数 Tension 0-1 可选）
 
 Bank: Ch2
@@ -109,7 +133,13 @@ Bank: Ch2
   event:/Ch2/Explode      2D, oneshot, SFX（低频冲击）
   event:/Ch2/Ritual       2D, oneshot, SFX
   event:/Ch2/Victory      2D, oneshot, SFX
+  event:/Ch2/PuppetTick   2D, oneshot, SFX
   event:/Amb/Ch2Empty     2D, looping, Amb
+
+Bank: Twist
+  event:/Twist/PearlEye       2D, oneshot, SFX
+  event:/Twist/MechanicalEye  2D, oneshot, SFX
+  event:/Twist/DroneAscent    2D, oneshot or loop, SFX
 
 Bank: UI
   event:/UI/Click         2D, oneshot, UI
@@ -141,6 +171,13 @@ Bank: UI
 | Amb.Ch2     | `event:/Amb/Ch2Empty`  |
 | UI.Click    | `event:/UI/Click`      |
 | UI.Hover    | `event:/UI/Hover`      |
+| Twist.PearlEye | `event:/Twist/PearlEye` |
+| Twist.MechanicalEye | `event:/Twist/MechanicalEye` |
+| Twist.DroneAscent | `event:/Twist/DroneAscent` |
+| Ch1.ShiftPass | `event:/Ch1/ShiftPass` |
+| Ch1.ShiftFail | `event:/Ch1/ShiftFail` |
+| Ch1.TimeoutWarn | `event:/Ch1/TimeoutWarn` |
+| Ch2.PuppetTick | `event:/Ch2/PuppetTick` |
 
 `Build.cs` 已经 `PublicDefinitions.Add("WITH_FMOD_CHECKMATE=1")`，AudioService 会优先走 FMOD path；任何 key 在 `FmodEventPaths` 找不到就退回 NativeCues。
 

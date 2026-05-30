@@ -24,7 +24,7 @@
 
 ---
 
-## 1. 当前已接入的 Cue（12 条 — code 已 hook）
+## 1. 当前已接入的 Cue（17 条 — code 已 hook）
 
 | Key | 触发位置 | 占位 .ogg | 设计目标 | 占位状态 | FMOD |
 |---|---|---|---|---|---|
@@ -40,6 +40,11 @@
 | **UI.Hover** | `MainMenuWidget` hover（卡 hover 已 disable 防密响） | click_005 | 极轻 tick | ✅ | 💤 |
 | **Amb.Ch1** | `Chapter1GameMode::BeginPlay` | spaceEngineLow_000 | 工厂底噪 loop（传送带 + 机器嗡鸣 + 偶发金属） | ⚠ 5s 短样本，UE 自动 loop 有接缝 | 💤 |
 | **Amb.Ch2** | `Ch2GameMode::BeginPlay` | spaceEngineSmall_000 | 空厂 ambient loop（远风 + 偶发滴水/共鸣） | ⚠ 5s 短样本，需 30s+ seamless | 💤 |
+| **Twist.DroneAscent** | `Chapter1GameMode::RequestTwist` | lowThreeTone | CameraReverse 低频上升 / 心理压力 | ⚠ 很短，仅 PV 占位 | 💤 |
+| **Twist.PearlEye** | `Chapter1GameMode::RequestTwist` | spaceTrash1 | 按扣脱落 / glitch snap | ⚠ 电子感偏强 | 💤 |
+| **Twist.MechanicalEye** | `Chapter1GameMode::PlayTwistOpticalBurnout` | phaserUp4 | 机械眼启动 / bloom pulse | ⚠ 可用作第一版 | 💤 |
+| **Ch1.ShiftPass** | `Chapter1GameMode::HandleShiftCompleted(success)` | twoTone1 | 班次完成铃声 | ⚠ 电子占位 | 💤 |
+| **Ch1.ShiftFail** | `Chapter1GameMode::HandleShiftCompleted(fail)` | lowDown | 班次失败 / 系统下沉 | ⚠ 电子占位 | 💤 |
 
 ---
 
@@ -47,10 +52,9 @@
 
 | 场景 | 当前用 | 应该是 | 优先级 |
 |---|---|---|---|
-| Ch1→Ch2 翻转拍点 `RequestTwist` | 借用 `Ch2.Ritual` | **`Twist.Pearl`** 独立，spec 期待 15s 完整"按扣脱落 → 机械眼亮起"演出 | 高（PV 拍点核心） |
 | Ch2 关卡步数超预算 `RestartCh2Level` | 借用 `Ch1.Wrong` | **`Ch2.Fail`** 独立，更"棋盘 reset"风格 | 低 |
-| Ch1 班次失败重选 `HandleShiftCompleted(bSuccess=false)` | 间接听到 Ch1.Wrong tail | **`Ch1.ShiftFail`** 独立，更"传送带停摆"工厂感 | 中 |
-| Ch1 班次完成 transition | 没声 | **`Ch1.ShiftPass`** 独立，"班次结束铃声" | 中 |
+
+2026-05-30 已改：`RequestTwist` 现在调用 `Twist.DroneAscent` + `Twist.PearlEye`，burnout 时调用 `Twist.MechanicalEye`；Ch1 班次成功/失败也已分别调用 `Ch1.ShiftPass` / `Ch1.ShiftFail`。
 
 ---
 
@@ -61,15 +65,11 @@
 | **`Music.MainMenu`** | 主菜单 BGM loop | 长 ambient 主题音乐，定调全游戏氛围 | 高（用户打开就听） |
 | **`Music.Ch1Loop`** | Ch1 班次中循环 | 低频脉动节奏 + 偶发齿轮 motif | 中 |
 | **`Music.Ch2Loop`** | Ch2 棋盘逃脱中循环 | 更稀疏、更冷的 piano + drone | 中 |
-| **`Twist.PearlEye`** | Ch1→Ch2 按扣脱落瞬间 | 短促"啪嗒"+ 玻璃裂；按扣眼脱落的物理声 | 高（PV 拍点） |
-| **`Twist.MechanicalEye`** | Ch1→Ch2 机械眼亮起 | 电子嗡鸣 + 蜂鸣启动，0.5s | 高（PV 拍点） |
 | **`Ch1.Card.Select`** | 玩家点选一张判据卡 | 卡片浮起 + 浮光声效；vs UI.Click 更专属 | 低 |
 | **`Ch1.Card.Deselect`** | 玩家反选 | 卡片回落，短反气泡声 | 低 |
 | **`Ch1.ConveyorIn`** | 娃娃从左侧传送带滑入 | 传送带"咔啦"启动 + 玩偶橡胶滑落 | 高（每只娃娃出场都该有） |
-| **`Ch1.ShiftPass`** | 班次完成 transition | 班次铃 / 工厂下班音 | 中 |
-| **`Ch1.ShiftFail`** | 班次失败 transition | 传送带停摆 / 警报声 | 中 |
-| **`Ch1.TimeoutWarn`** | Shift 3/4 娃娃倒计时 <3s | 滴答加快、紧迫的提示 | 中 |
-| **`Ch2.PuppetTick`** | 爆炸玩偶倒计时每回合脉冲 | 心跳 / 滴答；玩家能听出"还有 N 回合" | 中 |
+| **`Ch1.TimeoutWarn`** | Shift 3/4 娃娃倒计时 <3s | 滴答加快、紧迫的提示 | 中（已有 Kenney Digital 占位） |
+| **`Ch2.PuppetTick`** | 爆炸玩偶倒计时每回合脉冲 | 心跳 / 滴答；玩家能听出"还有 N 回合" | 中（已有 Kenney Digital 占位） |
 | **`Ch2.ModeBallet`** | Ch2.Move 的 Ballet 变种 | 轻盈 + 滑步声 | 中 |
 | **`Ch2.ModeClown`** | Ch2.Move 的 Clown 变种 | 笨重 + 铃铛 / 双扣摇晃声 | 中 |
 | **`UI.LangToggle`** | 中英切换按钮 | 短 click，可省（用 UI.Click 也行） | 低 |
@@ -84,8 +84,22 @@
 | https://kenney.nl/assets/sci-fi-sounds | CC0 | Sci-Fi Sounds | impactMetal_002, thrusterFire_001, engineCircular_000, lowFrequency_explosion_000/001, doorOpen_000, spaceEngineLow_000, spaceEngineSmall_000 |
 | https://kenney.nl/assets/interface-sounds | CC0 | Interface Sounds | confirmation_004, click_001, click_005 |
 | https://kenney.nl/assets/impact-sounds | CC0 | Impact Sounds | footstep_wood_001 |
+| https://kenney.nl/assets/digital-audio | CC0 | Digital Audio | spaceTrash1, phaserUp4, lowThreeTone, twoTone1, lowDown, highUp, tone1 |
 
 占位文件改名后放在 `Content/Audio/Placeholder/*.ogg`。**改名规则**：Key 替换点为下划线（`Ch1.Stamp` → `Ch1_Stamp.ogg`）。
+完整源包保留在 `Content/Audio/SourcePacks/Kenney_DigitalAudio/`，包含 `License.txt`。
+
+## 4.1 新增 Kenney Digital Audio 候选（2026-05-30）
+
+| Key | Placeholder file | Source file | 用途 |
+|---|---|---|---|
+| `Twist.PearlEye` | `Twist_PearlEye.ogg` | `spaceTrash1.ogg` | 按扣脱落 / glitch snap 候选 |
+| `Twist.MechanicalEye` | `Twist_MechanicalEye.ogg` | `phaserUp4.ogg` | 机械眼启动候选 |
+| `Twist.DroneAscent` | `Twist_DroneAscent.ogg` | `lowThreeTone.ogg` | 翻转低频上升占位 |
+| `Ch1.ShiftPass` | `Ch1_ShiftPass.ogg` | `twoTone1.ogg` | 班次完成提示 |
+| `Ch1.ShiftFail` | `Ch1_ShiftFail.ogg` | `lowDown.ogg` | 班次失败 / 系统下沉 |
+| `Ch1.TimeoutWarn` | `Ch1_TimeoutWarn.ogg` | `highUp.ogg` | 倒计时 warning |
+| `Ch2.PuppetTick` | `Ch2_PuppetTick.ogg` | `tone1.ogg` | 爆炸玩偶回合 tick |
 
 ---
 

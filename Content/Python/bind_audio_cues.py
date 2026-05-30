@@ -20,6 +20,13 @@ KEY_TO_ASSET = {
     "UI.Hover":    "UI_Hover",
     "Amb.Ch1":     "Amb_Ch1",
     "Amb.Ch2":     "Amb_Ch2",
+    "Twist.PearlEye":      "Twist_PearlEye",
+    "Twist.MechanicalEye": "Twist_MechanicalEye",
+    "Twist.DroneAscent":   "Twist_DroneAscent",
+    "Ch1.ShiftPass":       "Ch1_ShiftPass",
+    "Ch1.ShiftFail":       "Ch1_ShiftFail",
+    "Ch1.TimeoutWarn":     "Ch1_TimeoutWarn",
+    "Ch2.PuppetTick":      "Ch2_PuppetTick",
 }
 
 da = unreal.EditorAssetLibrary.load_asset(DA_PATH)
