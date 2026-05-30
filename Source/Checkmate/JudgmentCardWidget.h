@@ -11,6 +11,9 @@ class UTextBlock;
 class UMaterialInstanceDynamic;
 class UCardData;
 class UCardSelectionScreen;
+class UJudgmentCardWidget;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJudgmentCardHoverChanged, UJudgmentCardWidget*, CardWidget);
 
 /**
  * Balatro 风判据卡 widget 基类。
@@ -69,6 +72,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Card|Juice")
 	void SetInteractionLocked(bool bLocked);
+
+	UPROPERTY(BlueprintAssignable, Category="Card|Hover")
+	FOnJudgmentCardHoverChanged OnCardHoverStarted;
+
+	UPROPERTY(BlueprintAssignable, Category="Card|Hover")
+	FOnJudgmentCardHoverChanged OnCardHoverEnded;
 
 	/** 扇形铺开：每张卡有一个 base 旋转角度（度），叠加在 tilt 之上。Screen 在构造时分配。 */
 	UFUNCTION(BlueprintCallable, Category="Card|Layout")

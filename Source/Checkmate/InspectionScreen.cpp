@@ -4,6 +4,7 @@
 
 #include "AudioService.h"
 #include "CardData.h"
+#include "Ch1SelectedCardsBoardWidget.h"
 #include "Ch1LocSubsystem.h"
 #include "Chapter1GameMode.h"
 #include "DollData.h"
@@ -86,6 +87,10 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	OpticalFadeTotalSec = 0.0f;
 
 	SpawnDeskCards();
+	if (SelectedCardsBoardWidget)
+	{
+		SelectedCardsBoardWidget->SetCards(JudgmentCards);
+	}
 }
 
 void UInspectionScreen::SetDollActor(ADollDisplay* InActor)
@@ -176,6 +181,7 @@ void UInspectionScreen::NativeConstruct()
 	RenderCurrentDoll();
 	RenderProgress();
 	RefreshLocalizedTexts();
+	SpawnSelectedCardsBoard();
 
 	// 启动第一只娃娃的 timeout（若配置）
 	if (DollTimeoutSec > 0.0f)
@@ -198,6 +204,7 @@ void UInspectionScreen::NativeDestruct()
 	}
 
 	ClearDeskCards();
+	ClearSelectedCardsBoard();
 
 	if (MisjudgmentPPVolume)
 	{
@@ -352,6 +359,20 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 	{
 		MisjudgmentCount++;
 		ApplyMisjudgmentPressure();
+		OnMisjudgmentRecorded.Broadcast(MisjudgmentCount, WrongCount);
+		if (AChapter1GameMode* GM = Cast<AChapter1GameMode>(UGameplayStatics::GetGameMode(this)))
+		{
+			if (GM->bDeathCinematicTriggered)
+			{
+				bAwaitingNext = true;
+				SetButtonsEnabled(false);
+				if (GetWorld())
+				{
+					GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
+				}
+				return;
+			}
+		}
 	}
 
 	if (ToastText)
@@ -1304,4 +1325,36 @@ void UInspectionScreen::SpawnDeskCards()
 	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("[InspectionScreen] 桌面 spawn 了 %d 张 3D 纸卡"), DeskCardActors.Num());
+}
+
+void UInspectionScreen::SpawnSelectedCardsBoard()
+{
+	if (!bShowSelectedCardsBoard || SelectedCardsBoardWidget || JudgmentCards.Num() == 0)
+	{
+		return;
+	}
+
+	TSubclassOf<UCh1SelectedCardsBoardWidget> BoardClass = SelectedCardsBoardWidgetClass;
+	if (!BoardClass)
+	{
+		BoardClass = UCh1SelectedCardsBoardWidget::StaticClass();
+	}
+
+	SelectedCardsBoardWidget = CreateWidget<UCh1SelectedCardsBoardWidget>(GetOwningPlayer(), BoardClass);
+	if (!SelectedCardsBoardWidget)
+	{
+		return;
+	}
+
+	SelectedCardsBoardWidget->SetCards(JudgmentCards);
+	SelectedCardsBoardWidget->AddToViewport(/*ZOrder=*/82);
+}
+
+void UInspectionScreen::ClearSelectedCardsBoard()
+{
+	if (SelectedCardsBoardWidget)
+	{
+		SelectedCardsBoardWidget->RemoveFromParent();
+		SelectedCardsBoardWidget = nullptr;
+	}
 }

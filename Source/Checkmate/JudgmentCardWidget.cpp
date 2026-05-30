@@ -171,6 +171,7 @@ void UJudgmentCardWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const 
 	}
 
 	OnHoverStart();
+	OnCardHoverStarted.Broadcast(this);
 }
 
 void UJudgmentCardWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
@@ -191,6 +192,7 @@ void UJudgmentCardWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
 	}
 
 	OnHoverEnd();
+	OnCardHoverEnded.Broadcast(this);
 }
 
 FReply UJudgmentCardWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)

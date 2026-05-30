@@ -16,6 +16,7 @@ class UCh1LocSubsystem;
 class APostProcessVolume;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
+class UCh1SelectedCardsBoardWidget;
 
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
@@ -46,6 +47,7 @@ struct FShiftResult
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShiftCompleted, FShiftResult, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnMisjudgmentRecorded, int32, ShiftMisjudgments, int32, ShiftWrongCount);
 
 /**
  * Ch1 班次中的娃娃检验界面（灯盒版）。
@@ -123,6 +125,10 @@ public:
 	/** 班次结束时广播。 */
 	UPROPERTY(BlueprintAssignable, Category="Inspection")
 	FOnShiftCompleted OnShiftCompleted;
+
+	/** 每次误判立刻广播。Chapter1GameMode 用它统计整章死亡阈值。 */
+	UPROPERTY(BlueprintAssignable, Category="Inspection")
+	FOnMisjudgmentRecorded OnMisjudgmentRecorded;
 
 	/** toast 停留时间（秒），到点后自动推进下一只。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0.1"))
@@ -391,6 +397,16 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category="Inspection|DeskCards")
 	bool bHideDollAttributeTextWhenDollActorSpawn = true;
 
+	/** 左上角悬挂判据板：显示玩家已选卡，hover 时显示详细解释。 */
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|SelectedCardsBoard")
+	bool bShowSelectedCardsBoard = true;
+
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|SelectedCardsBoard")
+	TSubclassOf<UCh1SelectedCardsBoardWidget> SelectedCardsBoardWidgetClass;
+
+	UPROPERTY()
+	UCh1SelectedCardsBoardWidget* SelectedCardsBoardWidget = nullptr;
+
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
 	FTimerHandle OpticalOverrideTimerHandle;
@@ -438,6 +454,8 @@ private:
 	void SpawnDeskCards();
 	void ClearDeskCards();
 	void UpdateDeskCardDrops(float DeltaSeconds);
+	void SpawnSelectedCardsBoard();
+	void ClearSelectedCardsBoard();
 
 	/** 立即检查本班是否该终止（成功/失败）。返回 true 表示已 schedule 终止 broadcast。 */
 	bool CheckShiftTermination();

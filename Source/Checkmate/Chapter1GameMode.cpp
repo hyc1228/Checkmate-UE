@@ -23,6 +23,9 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "LevelSequence.h"
+#include "LevelSequenceActor.h"
+#include "LevelSequencePlayer.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "TimerManager.h"
 
@@ -515,6 +518,7 @@ void AChapter1GameMode::HandleCardsAssembled(const TArray<UCardData*>& SelectedC
 	ActiveInspectionScreen->RejectQuota = Cfg.RejectQuota;
 	ActiveInspectionScreen->MaxMisjudgmentsBeforeFail = Cfg.MaxMisjudgmentsBeforeFail;
 	ActiveInspectionScreen->OnShiftCompleted.AddDynamic(this, &AChapter1GameMode::HandleShiftCompleted);
+	ActiveInspectionScreen->OnMisjudgmentRecorded.AddDynamic(this, &AChapter1GameMode::HandleMisjudgmentRecorded);
 	ActiveInspectionScreen->AddToViewport();
 
 	// Spawn 3D 娃娃 actor（一班一只，复用到下一班）
@@ -558,21 +562,20 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 	if (ActiveInspectionScreen)
 	{
 		ActiveInspectionScreen->OnShiftCompleted.RemoveAll(this);
+		ActiveInspectionScreen->OnMisjudgmentRecorded.RemoveAll(this);
 		ActiveInspectionScreen->RemoveFromParent();
 		ActiveInspectionScreen = nullptr;
 	}
 
-	// 班次失败：回到当前班的选卡屏重试（不退回主菜单）
+	// 班次失败现在进入死亡分支，不再回选卡屏重试。
 	if (!Result.bSuccess)
 	{
-		UAudioService::PlayCueStatic(this, FName("Ch1.ShiftFail"));
-		UAudioService::PlayCueStatic(this, FName("Ch1.Wrong"));
-		// 短延迟后重启当班（让玩家看到 "班次失败" toast）
-		FTimerHandle RetryHandle;
-		GetWorld()->GetTimerManager().SetTimer(
-			RetryHandle,
-			FTimerDelegate::CreateLambda([this]() { ShowRetryTransition(); }),
-			1.2f, false);
+		TriggerDeathCinematic();
+		return;
+	}
+
+	if (bDeathCinematicTriggered)
+	{
 		return;
 	}
 
@@ -586,6 +589,143 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 	{
 		FinishCh1();
 	}
+}
+
+void AChapter1GameMode::HandleMisjudgmentRecorded(int32 ShiftMisjudgments, int32 ShiftWrongCount)
+{
+	if (bDeathCinematicTriggered || bTwistTriggered)
+	{
+		return;
+	}
+
+	TotalMisjudgmentsThisChapter++;
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: Misjudgment total=%d shift=%d wrong=%d threshold=%d"),
+		TotalMisjudgmentsThisChapter, ShiftMisjudgments, ShiftWrongCount, ChapterDeathMisjudgmentThreshold);
+
+	if (ChapterDeathMisjudgmentThreshold > 0
+		&& TotalMisjudgmentsThisChapter >= ChapterDeathMisjudgmentThreshold)
+	{
+		TriggerDeathCinematic();
+	}
+}
+
+bool AChapter1GameMode::TryPlaySequence(FName Key)
+{
+	if (Key.IsNone())
+	{
+		return false;
+	}
+
+	const TSoftObjectPtr<ULevelSequence>* SequencePtr = NamedSequences.Find(Key);
+	if (!SequencePtr || SequencePtr->IsNull())
+	{
+		return false;
+	}
+
+	ULevelSequence* Sequence = SequencePtr->LoadSynchronous();
+	if (!Sequence || !GetWorld())
+	{
+		return false;
+	}
+
+	FMovieSceneSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	ActiveSequenceActor = nullptr;
+	ActiveSequencePlayer = ULevelSequencePlayer::CreateLevelSequencePlayer(
+		GetWorld(),
+		Sequence,
+		Settings,
+		ActiveSequenceActor);
+
+	if (!ActiveSequencePlayer)
+	{
+		return false;
+	}
+
+	ActiveSequencePlayer->Play();
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: Playing sequence key=%s asset=%s"),
+		*Key.ToString(), *Sequence->GetPathName());
+	return true;
+}
+
+void AChapter1GameMode::TriggerDeathCinematic()
+{
+	if (bDeathCinematicTriggered || bTwistTriggered)
+	{
+		return;
+	}
+
+	bDeathCinematicTriggered = true;
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: ★ Death cinematic triggered after %d misjudgments"),
+		TotalMisjudgmentsThisChapter);
+
+	GetWorldTimerManager().ClearTimer(ProgressPanelTimer);
+	GetWorldTimerManager().ClearTimer(TwistHoldTimer);
+	GetWorldTimerManager().ClearTimer(TwistOpticalBurnoutTimer);
+
+	if (ActiveCardScreen)
+	{
+		ActiveCardScreen->OnAssemblyComplete.RemoveAll(this);
+		ActiveCardScreen->RemoveFromParent();
+		ActiveCardScreen = nullptr;
+	}
+
+	if (ActiveInspectionScreen)
+	{
+		ActiveInspectionScreen->OnShiftCompleted.RemoveAll(this);
+		ActiveInspectionScreen->OnMisjudgmentRecorded.RemoveAll(this);
+		ActiveInspectionScreen->TriggerOpticalInversionSurge(DeathHandCoverSeconds);
+	}
+
+	if (ActiveTransitionScreen)
+	{
+		ActiveTransitionScreen->RemoveFromParent();
+		ActiveTransitionScreen = nullptr;
+	}
+
+	TriggerPresentationCue(FName("Ch1.Death"), CurrentShiftIdx + 1, ECh1ProgressPanelMoment::TwistLeadIn, true);
+	UAudioService::PlayCueStatic(this, FName("Ch1.Wrong"), 1.15f);
+	UAudioService::PlayCueStatic(this, FName("Ch1.Toss"), 0.95f);
+	K2_OnDeathCinematicRequested(TotalMisjudgmentsThisChapter);
+
+	const bool bPlayedSequence = TryPlaySequence(DeathSequenceKey);
+	if (!bPlayedSequence)
+	{
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+		{
+			PC->bShowMouseCursor = false;
+			PC->SetIgnoreMoveInput(true);
+			PC->SetIgnoreLookInput(true);
+			PC->PlayerCameraManager->StartCameraFade(
+				0.0f, 1.0f, DeathHandCoverSeconds, FLinearColor::Black,
+				/*bShouldFadeAudio=*/false, /*bHoldWhenFinished=*/true);
+		}
+
+		GetWorldTimerManager().SetTimer(
+			DeathFallbackTimer,
+			FTimerDelegate::CreateUObject(this, &AChapter1GameMode::PlayDeathButtonDropFallback),
+			FMath::Max(0.05f, DeathHandCoverSeconds),
+			false);
+	}
+}
+
+void AChapter1GameMode::PlayDeathButtonDropFallback()
+{
+	UAudioService::PlayCueStatic(this, FName("Twist.PearlEye"), 0.8f);
+	if (ActiveInspectionScreen)
+	{
+		ActiveInspectionScreen->PlayTwistOpticalInversionBurnout(0.85f);
+	}
+
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+	{
+		PC->PlayerCameraManager->StartCameraFade(
+			1.0f, 0.35f, 0.35f, FLinearColor::Black,
+			/*bShouldFadeAudio=*/false, /*bHoldWhenFinished=*/true);
+	}
+
+	UE_LOG(LogTemp, Display,
+		TEXT("Chapter1: Death fallback beat reached. Bind NamedSequences[Ch1.Death] for hand cover, button drop, conveyor disposal."));
 }
 
 void AChapter1GameMode::ShowShiftTransition(int32 NextShiftIdx)

@@ -15,6 +15,9 @@ class UUserWidget;
 class ADollDisplay;
 class UCh1LocStrings;
 class APostProcessVolume;
+class ULevelSequence;
+class ULevelSequencePlayer;
+class ALevelSequenceActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCh1PresentationCue, FName, CueId, int32, ShiftNumber, ECh1ProgressPanelMoment, Moment);
 
@@ -176,6 +179,38 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category="Ch1|Presentation")
 	void K2_OnPresentationCue(FName CueId, int32 ShiftNumber, ECh1ProgressPanelMoment Moment, bool bMajorBeat);
 
+	// ── Ch1 Death Branch ───────────────────────────────────────────────────
+
+	/** 整章累计误判达到该数时触发死亡过场。0 = 关闭。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Death", meta=(ClampMin="0"))
+	int32 ChapterDeathMisjudgmentThreshold = 3;
+
+	/** 过场 Sequence map。推荐 key: Ch1.Death。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ch1|Death", meta=(ForceInlineRow))
+	TMap<FName, TSoftObjectPtr<ULevelSequence>> NamedSequences;
+
+	/** 死亡分支使用的 sequence key。未绑定时走轻量 fallback + Blueprint event。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Death")
+	FName DeathSequenceKey = TEXT("Ch1.Death");
+
+	/** fallback 中“手遮住屏幕”的黑场进入时长。正式资产请用 DeathSequenceKey 替代。 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Death", meta=(ClampMin="0.05"))
+	float DeathHandCoverSeconds = 0.55f;
+
+	/** 死亡过场是否已触发，避免误判与班次失败重复进入。 */
+	UPROPERTY(BlueprintReadOnly, Category="Ch1|Death")
+	bool bDeathCinematicTriggered = false;
+
+	/** 给 BP/Sequencer 接三段表现：手遮屏 → 扣子掉 → 传送带丢弃。 */
+	UFUNCTION(BlueprintImplementableEvent, Category="Ch1|Death")
+	void K2_OnDeathCinematicRequested(int32 TotalMisjudgments);
+
+	UFUNCTION(BlueprintCallable, Category="Ch1|Death")
+	void TriggerDeathCinematic();
+
+	UFUNCTION(BlueprintCallable, Category="Ch1|Sequences")
+	bool TryPlaySequence(FName Key);
+
 	// ── Twist (Ch1 → Ch2 翻转) ──────────────────────────────────────────────
 
 	/** 翻转目标关卡（默认 Ch2Test）。 */
@@ -245,6 +280,9 @@ private:
 	UFUNCTION()
 	void HandleShiftCompleted(FShiftResult Result);
 
+	UFUNCTION()
+	void HandleMisjudgmentRecorded(int32 ShiftMisjudgments, int32 ShiftWrongCount);
+
 	void BeginShift(int32 ShiftIdx);
 	void ShowShiftIntro(int32 ShiftIdx);
 	void ShowShiftTransition(int32 NextShiftIdx);
@@ -264,9 +302,17 @@ private:
 	void UpdateProgressPanelPostProcessCue(float DeltaSeconds);
 
 	void OpenCh2Map();
+	void PlayDeathButtonDropFallback();
 	FTimerHandle TwistHoldTimer;
 	FTimerHandle TwistOpticalBurnoutTimer;
 	FTimerHandle ProgressPanelTimer;
+	FTimerHandle DeathFallbackTimer;
+
+	UPROPERTY()
+	ULevelSequencePlayer* ActiveSequencePlayer = nullptr;
+
+	UPROPERTY()
+	ALevelSequenceActor* ActiveSequenceActor = nullptr;
 
 	UPROPERTY()
 	APostProcessVolume* ProgressPanelPostProcessVolume = nullptr;
@@ -277,4 +323,5 @@ private:
 	float ProgressPanelPostProcessElapsed = 0.0f;
 	bool bProgressPanelPostProcessActive = false;
 	bool bProgressPanelPostProcessMajor = false;
+	int32 TotalMisjudgmentsThisChapter = 0;
 };
