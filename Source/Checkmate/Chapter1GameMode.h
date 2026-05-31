@@ -12,6 +12,8 @@ class UCardSelectionScreen;
 class UCardData;
 class UDollData;
 class UUserWidget;
+class UCh1DeckReplacementWidget;
+class UCh1StarterStandardWidget;
 class ADollDisplay;
 class UCh1LocStrings;
 class APostProcessVolume;
@@ -20,6 +22,13 @@ class ULevelSequencePlayer;
 class ALevelSequenceActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnCh1PresentationCue, FName, CueId, int32, ShiftNumber, ECh1ProgressPanelMoment, Moment);
+
+enum class ECh1DeckSlot : uint8
+{
+	Red,
+	Black,
+	Neutral
+};
 
 /**
  * 单个班次配置。在 BP_Chapter1GameMode.Shifts 数组里逐条填。
@@ -44,7 +53,7 @@ struct FShiftConfig
 	TArray<UDollData*> DollSequence;
 
 	/** 玩家要选几张卡（≤ PoolCards.Num()）。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="0"))
 	int32 K = 3;
 
 	/** 本班需要正确判定多少次才下班（不论丢弃了多少错的）。 */
@@ -70,7 +79,22 @@ struct FShiftConfig
 
 	/** 累积误判到此数 → 班次失败（玩家被回选卡屏重新组装）。0 = 永不失败。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift", meta=(ClampMin="0"))
-	int32 MaxMisjudgmentsBeforeFail = 3;
+	int32 MaxMisjudgmentsBeforeFail = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Piecework")
+	bool bUsePieceworkEconomy = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Piecework", meta=(ClampMin="0"))
+	int32 DailyQuota = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Piecework", meta=(ClampMin="0"))
+	int32 DayDollTarget = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Piecework", meta=(ClampMin="0"))
+	int32 BaseGoodPrice = 50;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Piecework", meta=(ClampMin="0"))
+	int32 BaseRejectValue = 5;
 
 	/** Optional day/shift reveal copy. Empty fields use generated fallback text. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Shift|Presentation")
@@ -118,8 +142,93 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
 	TSubclassOf<UCh1ProgressPanelWidget> ProgressPanelWidgetClass;
 
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
+	TSubclassOf<UCh1StarterStandardWidget> StarterStandardWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
+	TSubclassOf<UCh1DeckReplacementWidget> DeckReplacementWidgetClass;
+
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Presentation")
 	bool bUseNativeProgressPanelFallback = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework")
+	bool bUsePieceworkEconomyFlow = true;
+
+	/** Runtime-only sequence balancing: keeps enough objectively-passable dolls in each paid shift without editing DataAssets. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework|Dolls")
+	bool bRebalanceDollSequenceForPiecework = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework|Dolls", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float DesiredObjectivePassDollRatio = 0.68f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework|Dolls", meta=(ClampMin="0"))
+	int32 MinObjectivePassDollsPerDay = 4;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework|Dolls", meta=(ClampMin="0"))
+	int32 MinObjectiveRejectDollsPerDay = 2;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike")
+	bool bUseEndlessRoguelikeRun = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike")
+	bool bBlockAutomaticTwistInEndlessRun = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Chapter2 Gate")
+	bool bAdvanceToChapter2OnQuotaMiss = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Chapter2 Gate")
+	bool bAdvanceToChapter2OnMoneyGoal = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Chapter2 Gate", meta=(ClampMin="1"))
+	int32 RunMoneyToChapter2Threshold = 700;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Chapter2 Gate")
+	bool bAdvanceToChapter2OnCheckmateBurst = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Chapter2 Gate", meta=(ClampMin="1"))
+	int32 CheckmateBurstDayMoneyThreshold = 260;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework")
+	bool bRequireBridgeCardBeforeCollapse = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="1"))
+	int32 MaxDeckCards = 4;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="0"))
+	int32 MaxRedCards = 2;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="0"))
+	int32 MaxBlackCards = 2;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="0"))
+	int32 ReplacementQuotaPressure = 20;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="0"))
+	int32 QuotaFailurePressure = 20;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="0.0"))
+	float MoneyQuotaPressureRate = 0.04f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="1.0"))
+	float EndlessQuotaGrowthRate = 1.12f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="0"))
+	int32 EndlessQuotaLinearStep = 40;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Roguelike", meta=(ClampMin="1", ClampMax="30"))
+	int32 MaxEndlessDollTarget = 18;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework")
+	UDollData* ForcedCollapseDoll = nullptr;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework", meta=(ClampMin="0"))
+	int32 FalsePositiveImmediateValue = 0;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework", meta=(ClampMin="0"))
+	int32 FalsePositiveRecallPenalty = 65;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Piecework", meta=(ClampMin="0"))
+	int32 FalseNegativeDiscardPenalty = 25;
 
 	/** 3D 娃娃 actor class（继承 ADollDisplay；可在 BP_DollDisplay 调 mesh / 颜色等）。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Classes")
@@ -127,7 +236,7 @@ public:
 
 	/** 3D 娃娃 spawn 位置（世界坐标）。 */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene")
-	FTransform DollSpawnTransform = FTransform(FRotator::ZeroRotator, FVector(0.0f, 0.0f, 100.0f));
+	FTransform DollSpawnTransform = FTransform(FRotator::ZeroRotator, FVector(-120.0f, 0.0f, 70.0f));
 
 	/** Runtime camera polish for the graybox Ch1 test map. Keeps the doll/table visible without editing the map asset. */
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera")
@@ -144,7 +253,7 @@ public:
 	FVector RuntimeCameraLookAt = FVector(0.0f, 0.0f, 155.0f);
 
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera", meta=(EditCondition="bOverrideInspectionCameraTransform", ClampMin="100.0"))
-	float RuntimeCameraOrthoWidth = 720.0f;
+	float RuntimeCameraOrthoWidth = 620.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category="Ch1|Scene|Camera")
 	bool bSpawnRuntimeInspectionBackdrop = true;
@@ -183,7 +292,7 @@ public:
 
 	/** 整章累计误判达到该数时触发死亡过场。0 = 关闭。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category="Ch1|Death", meta=(ClampMin="0"))
-	int32 ChapterDeathMisjudgmentThreshold = 3;
+	int32 ChapterDeathMisjudgmentThreshold = 0;
 
 	/** 过场 Sequence map。推荐 key: Ch1.Death。 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Ch1|Death", meta=(ForceInlineRow))
@@ -233,6 +342,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch1|Twist")
 	void RequestTwist();
 
+	UFUNCTION(BlueprintImplementableEvent, Category="Ch1|Twist")
+	void K2_OnChapter2TransitionReason(FName Reason, int32 RunMoney, int32 MoneyGoal, bool bQuotaMet);
+
 	// ── PV capture helpers (development-only console seams) ────────────────
 
 	/** Jump the running Ch1 scene into a named PV capture preset. */
@@ -270,12 +382,43 @@ private:
 	UUserWidget* ActiveTransitionScreen = nullptr;
 
 	UPROPERTY()
+	UCh1StarterStandardWidget* ActiveStarterStandardScreen = nullptr;
+
+	UPROPERTY()
+	UCh1DeckReplacementWidget* ActiveDeckReplacementScreen = nullptr;
+
+	UPROPERTY()
 	ADollDisplay* ActiveDollActor = nullptr;
 
+	UPROPERTY()
+	TArray<UCardData*> LastSelectedCards;
+
+	UPROPERTY()
+	TArray<UCardData*> CurrentDeckCards;
+
+	UPROPERTY()
+	UCardData* PendingDraftCard = nullptr;
+
 	int32 CurrentShiftIdx = 0;
+	FShiftConfig ActiveRuntimeShiftConfig;
+	bool bQuotaCollapseActive = false;
+	bool bStarterStandardSeen = false;
+	bool bInspectionLaunchInProgress = false;
+	bool bForceAllowChapter2Transition = false;
+	int32 RunTotalMoneyEarned = 0;
+	int32 RunCardReplacementCount = 0;
+	int32 RunDraftSkipCount = 0;
+	int32 RunQuotaFailureCount = 0;
+	FName PendingChapter2TransitionReason = NAME_None;
 
 	UFUNCTION()
 	void HandleCardsAssembled(const TArray<UCardData*>& SelectedCards);
+
+	UFUNCTION()
+	void HandleDeckReplacementResolved(UCardData* NewCard, UCardData* ReplacedCard);
+
+	UFUNCTION()
+	void HandleStarterStandardConfirmed();
 
 	UFUNCTION()
 	void HandleShiftCompleted(FShiftResult Result);
@@ -284,6 +427,26 @@ private:
 	void HandleMisjudgmentRecorded(int32 ShiftMisjudgments, int32 ShiftWrongCount);
 
 	void BeginShift(int32 ShiftIdx);
+	void ShowStarterStandardPanel();
+	void LaunchInspectionForCurrentShift();
+	bool ApplyDraftSelectionOrRequestReplacement(const TArray<UCardData*>& SelectedCards);
+	bool CanAddCardToDeck(UCardData* Card) const;
+	void AddCardToDeck(UCardData* Card);
+	TArray<UCardData*> GetReplacementCandidates(UCardData* NewCard) const;
+	ECh1DeckSlot GetDeckSlot(const UCardData* Card) const;
+	int32 CountDeckSlot(ECh1DeckSlot Slot) const;
+	int32 GetUnlockedSlotCap(ECh1DeckSlot Slot, int32 ShiftIdx) const;
+	FShiftConfig BuildRuntimeShiftConfig(int32 ShiftIdx) const;
+	TArray<UCardData*> BuildRoguelikeCardPool(int32 ShiftIdx) const;
+	TArray<UDollData*> BuildBalancedInspectionDollSequence(
+		const TArray<UDollData*>& SourceSequence,
+		const TArray<UCardData*>& ActiveCards,
+		int32 TargetCount) const;
+	bool DoesDollPassActiveCards(const UDollData* Doll, const TArray<UCardData*>& ActiveCards) const;
+	int32 ComputeDailyQuota(const FShiftConfig& BaseCfg, int32 ShiftIdx) const;
+	int32 ComputeDayDollTarget(const FShiftConfig& BaseCfg, int32 ShiftIdx) const;
+	void ClearDeckReplacementScreen();
+	TArray<UCardData*> BuildDraftPoolForShift(const FShiftConfig& Cfg) const;
 	void ShowShiftIntro(int32 ShiftIdx);
 	void ShowShiftTransition(int32 NextShiftIdx);
 	void ShowRetryTransition();
@@ -293,6 +456,11 @@ private:
 		float HoldSeconds,
 		FTimerDelegate CompletionDelegate);
 	void FinishCh1();
+	void TriggerChapter2Transition(FName Reason, bool bQuotaMet);
+	void StartQuotaCollapseInspection();
+	UDollData* FindFallbackCollapseDoll() const;
+	bool HasSelectedBridgeCard() const;
+	bool HasSelectedCheckmateCard() const;
 	void PlayTwistOpticalBurnout();
 	void SetUIInputMode();
 	void ApplyRuntimeCameraFraming(AActor* CameraActor) const;

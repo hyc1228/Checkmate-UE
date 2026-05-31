@@ -2,6 +2,8 @@
 
 #include "Ch1ProgressPanelWidget.h"
 
+#include "CheckmateFonts.h"
+
 #include "Styling/CoreStyle.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -37,9 +39,9 @@ void UCh1ProgressPanelWidget::StartDismiss()
 
 TSharedRef<SWidget> UCh1ProgressPanelWidget::RebuildWidget()
 {
-	const FSlateFontInfo EyebrowFont = FCoreStyle::GetDefaultFontStyle("Regular", 15);
-	const FSlateFontInfo TitleFont = FCoreStyle::GetDefaultFontStyle("Bold", 42);
-	const FSlateFontInfo BodyFont = FCoreStyle::GetDefaultFontStyle("Regular", 19);
+	const FSlateFontInfo EyebrowFont = CheckmateFonts::BodyLight(15);
+	const FSlateFontInfo TitleFont = CheckmateFonts::Title(42);
+	const FSlateFontInfo BodyFont = CheckmateFonts::Body(19);
 
 	TSharedRef<SWidget> Root =
 		SNew(SOverlay)

@@ -2,6 +2,7 @@
 
 #include "TitlePromptWidget.h"
 
+#include "CheckmateFonts.h"
 #include "TitleScreenGameMode.h"
 
 #include "Kismet/GameplayStatics.h"
@@ -65,7 +66,7 @@ TSharedRef<SWidget> UTitlePromptWidget::RebuildWidget()
 			SAssignNew(PromptText, STextBlock)
 			.Text(FText::FromString(TEXT("Press any button to start")))
 			.ColorAndOpacity(FLinearColor(0.94f, 0.90f, 0.80f, 1.0f))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
+			.Font(CheckmateFonts::BodyBold(22))
 			.Justification(ETextJustify::Center)
 		]
 	]

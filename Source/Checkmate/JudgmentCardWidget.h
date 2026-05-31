@@ -12,6 +12,8 @@ class UMaterialInstanceDynamic;
 class UCardData;
 class UCardSelectionScreen;
 class UJudgmentCardWidget;
+class UCh1CardTooltipWidget;
+class UCh1RoundedImageWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJudgmentCardHoverChanged, UJudgmentCardWidget*, CardWidget);
 
@@ -73,6 +75,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Card|Juice")
 	void SetInteractionLocked(bool bLocked);
 
+	UFUNCTION(BlueprintCallable, Category="Card|Juice")
+	void PlayScorePulse(float Strength = 1.0f);
+
 	UPROPERTY(BlueprintAssignable, Category="Card|Hover")
 	FOnJudgmentCardHoverChanged OnCardHoverStarted;
 
@@ -106,6 +111,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Visuals", meta=(ClampMin="32.0"))
 	FVector2D FallbackCardImageSize = FVector2D(160.0f, 220.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Visuals", meta=(ClampMin="0.0"))
+	float CardCornerRadiusPx = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Tooltip")
+	bool bShowNativeHoverTooltip = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Tooltip")
+	FVector2D TooltipViewportOffset = FVector2D(-174.0f, -154.0f);
 
 	/** 被选中时永久上浮像素（Balatro：选中后停留在抬起状态）。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Card|Selection", meta=(ClampMin="0.0"))
@@ -163,6 +177,7 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
@@ -213,11 +228,24 @@ private:
 	float OutroStartOpacity = 1.0f;
 	float OutroTargetOpacity = 1.0f;
 	float CurrentOutroOpacity = 1.0f;
+	float ScorePulseElapsed = 999.0f;
+	float ScorePulseDuration = 0.44f;
+	float ScorePulseStrength = 1.0f;
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* CardMID = nullptr;
 
+	UPROPERTY()
+	UCh1CardTooltipWidget* ActiveTooltip = nullptr;
+
+	UPROPERTY()
+	UCh1RoundedImageWidget* RoundedCardImage = nullptr;
+
 	void ApplyTiltToTransform();
+	void EnsureRoundedCardImage();
+	void ShowHoverTooltip();
+	void HideHoverTooltip();
+	void UpdateHoverTooltipPosition();
 	void StartOutro(const FVector2D& TargetOffset, float TargetAngleAdd, float InTargetScale, float InTargetOpacity, float DurationSec, float DelaySeconds);
 	void TickOutro(float InDeltaTime);
 	FVector2D CalculateNormalizedTilt(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) const;

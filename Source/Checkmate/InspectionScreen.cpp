@@ -5,6 +5,7 @@
 #include "AudioService.h"
 #include "CardData.h"
 #include "Ch1SelectedCardsBoardWidget.h"
+#include "Ch1ScoreHudWidget.h"
 #include "Ch1LocSubsystem.h"
 #include "Chapter1GameMode.h"
 #include "DollData.h"
@@ -68,6 +69,10 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	WrongCount = 0;
 	TrueAcceptCount = 0;
 	TrueRejectCount = 0;
+	MoneyEarned = 0;
+	PendingRecallPenalty = 0;
+	ComboCount = 0;
+	CorrectRejectStreak = 0;
 	MisjudgmentCount = 0;
 	bHasDriftedFalsePos = false;
 	bHasDriftedFalseNeg = false;
@@ -91,6 +96,7 @@ void UInspectionScreen::SetShiftData(const TArray<UCardData*>& InJudgmentCards, 
 	{
 		SelectedCardsBoardWidget->SetCards(JudgmentCards);
 	}
+	RefreshScoreHud();
 }
 
 void UInspectionScreen::SetDollActor(ADollDisplay* InActor)
@@ -182,6 +188,7 @@ void UInspectionScreen::NativeConstruct()
 	RenderProgress();
 	RefreshLocalizedTexts();
 	SpawnSelectedCardsBoard();
+	SpawnScoreHud();
 
 	// 启动第一只娃娃的 timeout（若配置）
 	if (DollTimeoutSec > 0.0f)
@@ -205,6 +212,7 @@ void UInspectionScreen::NativeDestruct()
 
 	ClearDeskCards();
 	ClearSelectedCardsBoard();
+	ClearScoreHud();
 
 	if (MisjudgmentPPVolume)
 	{
@@ -355,6 +363,32 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 	case EOutcomeClass::TrueNegative:  TrueRejectCount++; break;
 	default: break;
 	}
+	const int32 PreviousNetMoney = MoneyEarned - PendingRecallPenalty;
+	const int32 MoneyDelta = ScorePieceworkOutcome(Outcome, Doll);
+	const int32 NetMoney = MoneyEarned - PendingRecallPenalty;
+	const int32 NetMoneyDelta = NetMoney - PreviousNetMoney;
+	if (bUsePieceworkEconomy)
+	{
+		const TArray<UCardData*> TriggeredCards = CollectTriggeredScoreCards(Outcome, Doll);
+		float VisibleMultiplier = 1.0f;
+		if (NetMoneyDelta > 0)
+		{
+			const int32 ScoreBase = Outcome == EOutcomeClass::TrueNegative ? BaseRejectValue : BaseGoodPrice;
+			if (ScoreBase > 0)
+			{
+				VisibleMultiplier = FMath::Max(1.0f, static_cast<float>(NetMoneyDelta) / static_cast<float>(ScoreBase));
+			}
+		}
+		if (TriggeredCards.Num() == 0 && ComboCount <= 1)
+		{
+			VisibleMultiplier = 1.0f;
+		}
+		if (TriggeredCards.Num() > 0 && SelectedCardsBoardWidget)
+		{
+			SelectedCardsBoardWidget->PulseCards(TriggeredCards);
+		}
+		PlayScoreHudEvent(NetMoneyDelta, VisibleMultiplier);
+	}
 	if (UJudgmentEvaluator::IsMisjudgment(Outcome))
 	{
 		MisjudgmentCount++;
@@ -403,13 +437,37 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 					FailReason.IsEmpty() ? TEXT("符合所有判据") : *FailReason);
 			}
 		}
+		if (bUsePieceworkEconomy)
+		{
+			Toast += FString::Printf(TEXT("\n$%+d  Total $%d / $%d  Combo %d"),
+				MoneyDelta,
+				MoneyEarned - PendingRecallPenalty,
+				DailyQuota,
+				ComboCount);
+		}
 		ToastText->SetText(FText::FromString(Toast));
 	}
 
+	RenderProgress();
 	StartFeedback(bPlayerCorrect, bPlayerChosePass, GroundTruth == EJudgmentVerdict::Pass);
 	OnVerdictVisualFeedback(bPlayerCorrect, bPlayerChosePass, GroundTruth == EJudgmentVerdict::Pass);
 
 	// Twist 触发优先于班次完成检查：final Pearl 常常同时满足 CorrectGoal。
+	if (bTwistOnAnyVerdictForLastDoll && CurrentDollIndex >= DollSequence.Num() - 1)
+	{
+		if (AChapter1GameMode* GM = Cast<AChapter1GameMode>(UGameplayStatics::GetGameMode(this)))
+		{
+			GM->RequestTwist();
+			if (GM->bTwistTriggered)
+			{
+				bAwaitingNext = true;
+				SetButtonsEnabled(false);
+				if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
+				return;
+			}
+		}
+	}
+
 	if (Doll && Doll->bIsTwistTrigger)
 	{
 		const bool bMainPearlApprove = bPlayerChosePass && GroundTruth == EJudgmentVerdict::Pass;
@@ -424,12 +482,14 @@ void UInspectionScreen::HandlePlayerChoice(bool bPlayerChosePass)
 			if (AChapter1GameMode* GM = Cast<AChapter1GameMode>(UGameplayStatics::GetGameMode(this)))
 			{
 				GM->RequestTwist();
+				if (GM->bTwistTriggered)
+				{
+					bAwaitingNext = true;
+					SetButtonsEnabled(false);
+					if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
+					return;
+				}
 			}
-
-			bAwaitingNext = true;
-			SetButtonsEnabled(false);
-			if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(DollTimeoutHandle);
-			return;
 		}
 	}
 
@@ -479,7 +539,47 @@ bool UInspectionScreen::CheckShiftTermination()
 	}
 
 	// 失败：误判超上限
-	if (MaxMisjudgmentsBeforeFail > 0 && MisjudgmentCount >= MaxMisjudgmentsBeforeFail)
+	if (bUsePieceworkEconomy)
+	{
+		const int32 ProcessedCount = CurrentDollIndex + 1;
+		const int32 TargetCount = DayDollTarget > 0 ? DayDollTarget : DollSequence.Num();
+		if (TargetCount > 0 && ProcessedCount >= TargetCount)
+		{
+			bShiftEnded = true;
+			const int32 NetMoney = MoneyEarned - PendingRecallPenalty;
+
+			FShiftResult R;
+			R.TotalDolls = ProcessedCount;
+			R.CorrectCount = CorrectCount;
+			R.WrongCount = WrongCount;
+			R.TrueAcceptCount = TrueAcceptCount;
+			R.TrueRejectCount = TrueRejectCount;
+			R.MoneyEarned = NetMoney;
+			R.DailyQuota = DailyQuota;
+			R.bQuotaMet = DailyQuota <= 0 || NetMoney >= DailyQuota;
+			R.bSuccess = R.bQuotaMet;
+
+			if (ToastText)
+			{
+				ToastText->SetText(FText::FromString(FString::Printf(
+					TEXT("Day sealed: $%d / $%d%s"),
+					NetMoney,
+					DailyQuota,
+					R.bQuotaMet ? TEXT("") : TEXT("\nQuota collapse"))));
+			}
+
+			if (GetWorld())
+			{
+				GetWorld()->GetTimerManager().SetTimer(ShiftEndTimer,
+					FTimerDelegate::CreateLambda([this, R]() {
+						OnShiftCompleted.Broadcast(R);
+					}), 1.8f, false);
+			}
+			return true;
+		}
+	}
+
+	if (!bUsePieceworkEconomy && MaxMisjudgmentsBeforeFail > 0 && MisjudgmentCount >= MaxMisjudgmentsBeforeFail)
 	{
 		bShiftEnded = true;
 		UE_LOG(LogTemp, Display, TEXT("[InspectionScreen] ★ 班次失败：误判 %d/%d"), MisjudgmentCount, MaxMisjudgmentsBeforeFail);
@@ -946,6 +1046,357 @@ void UInspectionScreen::PlayVerdictAudio(bool bCorrect, bool bPlayerChosePass)
 	UAudioService::PlayCueStatic(this, VerdictCue, Volume);
 }
 
+int32 UInspectionScreen::ScorePieceworkOutcome(EOutcomeClass Outcome, const UDollData* Doll)
+{
+	if (!bUsePieceworkEconomy)
+	{
+		return 0;
+	}
+
+	int32 Delta = 0;
+	switch (Outcome)
+	{
+	case EOutcomeClass::TruePositive:
+		ComboCount = FMath::Clamp(ComboCount + 1, 0, MaxCombo);
+		CorrectRejectStreak = 0;
+		Delta = ComputeGoodSaleValue(Doll);
+		break;
+
+	case EOutcomeClass::TrueNegative:
+		ComboCount = FMath::Clamp(ComboCount + 1, 0, MaxCombo);
+		CorrectRejectStreak++;
+		Delta = ComputeCorrectRejectValue(Doll);
+		break;
+
+	case EOutcomeClass::FalsePositive:
+		ComboCount = 0;
+		CorrectRejectStreak = 0;
+		Delta = FalsePositiveImmediateValue;
+		if (!HasRecallExemptionCard())
+		{
+			float PenaltyMultiplier = 1.0f;
+			for (const UCardData* Card : JudgmentCards)
+			{
+				if (!Card) continue;
+				if (Card->PieceworkEffect == ECh1CardEffect::DangerousTears
+					&& UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Tearful")))
+				{
+					PenaltyMultiplier *= 1.25f;
+				}
+				else if (Card->PieceworkEffect == ECh1CardEffect::QueenGambit)
+				{
+					PenaltyMultiplier *= 1.35f;
+				}
+			}
+			PendingRecallPenalty += FMath::RoundToInt(FalsePositiveRecallPenalty * PenaltyMultiplier);
+		}
+		break;
+
+	case EOutcomeClass::FalseNegative:
+		ComboCount = 0;
+		CorrectRejectStreak = 0;
+		Delta = -FalseNegativeDiscardPenalty;
+		break;
+	}
+
+	MoneyEarned += Delta;
+	return Delta;
+}
+
+int32 UInspectionScreen::ComputeGoodSaleValue(const UDollData* Doll) const
+{
+	float Multiplier = 1.0f;
+	int32 FlatBonus = 0;
+
+	for (const UCardData* Card : JudgmentCards)
+	{
+		if (!Card) continue;
+
+		if (Card->CardColor == ECh1CardColor::RedBonus || Card->CardColor == ECh1CardColor::Special)
+		{
+			Multiplier *= FMath::Max(0.0f, Card->GoodValueMultiplier);
+			FlatBonus += Card->FlatGoodValueBonus;
+		}
+
+		switch (Card->PieceworkEffect)
+		{
+		case ECh1CardEffect::PriceTag:
+			Multiplier *= 1.20f;
+			break;
+		case ECh1CardEffect::HighHeelsValue:
+			if (UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("HighHeels"))) Multiplier *= 1.50f;
+			break;
+		case ECh1CardEffect::ComboDiscipline:
+			Multiplier *= 1.0f + FMath::Clamp(ComboCount, 0, MaxCombo) * 0.05f;
+			break;
+		case ECh1CardEffect::LockedRose:
+			if (UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("RoseAdornment"))) Multiplier *= 1.50f;
+			break;
+		case ECh1CardEffect::BowDiscipline:
+			if (UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Ribbon"))) Multiplier *= 1.30f;
+			break;
+		case ECh1CardEffect::HeartGaze:
+			if (UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("HeartEye"))) Multiplier *= 1.35f;
+			break;
+		case ECh1CardEffect::RoseGaze:
+			if (UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("RoseEye"))) Multiplier *= 1.50f;
+			break;
+		case ECh1CardEffect::TheGaze:
+			Multiplier *= 1.35f;
+			break;
+		case ECh1CardEffect::WhiteGloves:
+			Multiplier *= 1.40f;
+			break;
+		case ECh1CardEffect::PearlStandard:
+			Multiplier *= 1.50f;
+			break;
+		case ECh1CardEffect::ApronDuty:
+			Multiplier *= 1.35f;
+			break;
+		case ECh1CardEffect::SwordAndSerpent:
+			if (ComboCount >= 5) Multiplier *= 2.0f;
+			break;
+		case ECh1CardEffect::QueenGambit:
+			Multiplier *= 1.75f;
+			break;
+		default:
+			break;
+		}
+
+		if (Card->bUseNegativeLaserFoil || Card->CardColor == ECh1CardColor::Special)
+		{
+			if (Card->NegativeLaserScoreMultiplier > 1.0f)
+			{
+				Multiplier *= Card->NegativeLaserScoreMultiplier;
+			}
+		}
+	}
+
+	return FMath::Max(0, FMath::RoundToInt((BaseGoodPrice + FlatBonus) * Multiplier));
+}
+
+int32 UInspectionScreen::ComputeCorrectRejectValue(const UDollData* Doll) const
+{
+	float Multiplier = 1.0f;
+	int32 Bonus = 0;
+
+	for (const UCardData* Card : JudgmentCards)
+	{
+		if (!Card) continue;
+
+		Bonus += Card->CorrectRejectBonus;
+		switch (Card->PieceworkEffect)
+		{
+		case ECh1CardEffect::DangerousTears:
+			if (UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Tearful"))) Bonus += FMath::RoundToInt(BaseGoodPrice * 0.5f);
+			break;
+		case ECh1CardEffect::SmilingThroughTears:
+			if (UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Smile")) && UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Tearful")))
+			{
+				Bonus += BaseGoodPrice;
+			}
+			break;
+		case ECh1CardEffect::ApronDuty:
+			if (!UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Apron"))) Bonus += FMath::RoundToInt(BaseGoodPrice * 0.2f);
+			break;
+		case ECh1CardEffect::CheckmateDiscard:
+			Multiplier *= 1.50f;
+			if (CorrectRejectStreak >= 3)
+			{
+				Bonus += 40;
+			}
+			break;
+		default:
+			break;
+		}
+
+		if (Card->bUseNegativeLaserFoil || Card->CardColor == ECh1CardColor::Special)
+		{
+			if (Card->NegativeLaserScoreMultiplier > 1.0f)
+			{
+				Multiplier *= Card->NegativeLaserScoreMultiplier;
+			}
+		}
+	}
+
+	return FMath::Max(0, FMath::RoundToInt((BaseRejectValue + Bonus) * Multiplier));
+}
+
+bool UInspectionScreen::HasRecallExemptionCard() const
+{
+	for (const UCardData* Card : JudgmentCards)
+	{
+		if (Card && Card->PieceworkEffect == ECh1CardEffect::RecallExemption)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+TArray<UCardData*> UInspectionScreen::CollectTriggeredScoreCards(EOutcomeClass Outcome, const UDollData* Doll) const
+{
+	TArray<UCardData*> TriggeredCards;
+
+	for (UCardData* Card : JudgmentCards)
+	{
+		if (!Card)
+		{
+			continue;
+		}
+
+		bool bTriggered = false;
+		switch (Outcome)
+		{
+		case EOutcomeClass::TruePositive:
+			if ((Card->CardColor == ECh1CardColor::RedBonus || Card->CardColor == ECh1CardColor::Special)
+				&& (Card->FlatGoodValueBonus != 0 || !FMath::IsNearlyEqual(Card->GoodValueMultiplier, 1.0f)))
+			{
+				bTriggered = true;
+			}
+			switch (Card->PieceworkEffect)
+			{
+			case ECh1CardEffect::PriceTag:
+			case ECh1CardEffect::TheGaze:
+			case ECh1CardEffect::QueenGambit:
+				bTriggered = true;
+				break;
+			case ECh1CardEffect::HighHeelsValue:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("HighHeels"));
+				break;
+			case ECh1CardEffect::ComboDiscipline:
+				bTriggered = ComboCount > 0;
+				break;
+			case ECh1CardEffect::LockedRose:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("RoseAdornment"));
+				break;
+			case ECh1CardEffect::RoseGaze:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("RoseEye"));
+				break;
+			case ECh1CardEffect::BowDiscipline:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Ribbon"));
+				break;
+			case ECh1CardEffect::HeartGaze:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("HeartEye"));
+				break;
+			case ECh1CardEffect::WhiteGloves:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("WhiteGloves"));
+				break;
+			case ECh1CardEffect::PearlStandard:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("PearlNecklace"));
+				break;
+			case ECh1CardEffect::ApronDuty:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Apron"));
+				break;
+			case ECh1CardEffect::SwordAndSerpent:
+				bTriggered = ComboCount >= 5;
+				break;
+			default:
+				break;
+			}
+			break;
+
+		case EOutcomeClass::TrueNegative:
+		{
+			FString FailReason;
+			if (Card->CardColor == ECh1CardColor::BlackCriterion
+				&& !UJudgmentEvaluator::DollMatchesCardCriterion(Doll, Card, FailReason))
+			{
+				bTriggered = true;
+			}
+			if (Card->CorrectRejectBonus > 0)
+			{
+				bTriggered = true;
+			}
+			switch (Card->PieceworkEffect)
+			{
+			case ECh1CardEffect::DangerousTears:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Tearful"));
+				break;
+			case ECh1CardEffect::SmilingThroughTears:
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Smile"))
+					&& UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Tearful"));
+				break;
+			case ECh1CardEffect::ApronDuty:
+				bTriggered = !UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Apron"));
+				break;
+			case ECh1CardEffect::CheckmateDiscard:
+				bTriggered = true;
+				break;
+			default:
+				break;
+			}
+			break;
+		}
+
+		case EOutcomeClass::FalsePositive:
+			if (Card->PieceworkEffect == ECh1CardEffect::RecallExemption)
+			{
+				bTriggered = true;
+			}
+			else if (Card->PieceworkEffect == ECh1CardEffect::DangerousTears)
+			{
+				bTriggered = UJudgmentEvaluator::DollHasPieceworkTrait(Doll, TEXT("Tearful"));
+			}
+			else if (Card->PieceworkEffect == ECh1CardEffect::QueenGambit)
+			{
+				bTriggered = true;
+			}
+			break;
+
+		default:
+			break;
+		}
+
+		if (bTriggered)
+		{
+			TriggeredCards.Add(Card);
+		}
+	}
+
+	return TriggeredCards;
+}
+
+void UInspectionScreen::RefreshScoreHud()
+{
+	if (!ScoreHudWidget)
+	{
+		return;
+	}
+
+	const int32 TargetCount = DayDollTarget > 0 ? DayDollTarget : DollSequence.Num();
+	const int32 ProcessedCount = CorrectCount + WrongCount;
+	ScoreHudWidget->SetScoreState(
+		ShiftNumber,
+		MoneyEarned - PendingRecallPenalty,
+		DailyQuota,
+		ProcessedCount,
+		TargetCount);
+}
+
+void UInspectionScreen::PlayScoreHudEvent(int32 NetMoneyDelta, float VisibleMultiplier)
+{
+	if (!ScoreHudWidget)
+	{
+		return;
+	}
+
+	const int32 TargetCount = DayDollTarget > 0 ? DayDollTarget : DollSequence.Num();
+	const int32 ProcessedCount = CorrectCount + WrongCount;
+	ScoreHudWidget->SetScoreState(
+		ShiftNumber,
+		MoneyEarned - PendingRecallPenalty,
+		DailyQuota,
+		ProcessedCount,
+		TargetCount);
+	ScoreHudWidget->PlayScoreEvent(
+		NetMoneyDelta,
+		MoneyEarned - PendingRecallPenalty,
+		DailyQuota,
+		ComboCount,
+		VisibleMultiplier);
+}
+
 void UInspectionScreen::StartVerdictPostProcessFeedback(bool bCorrect)
 {
 	EnsureOpticalInversionPostProcess();
@@ -1164,15 +1615,30 @@ void UInspectionScreen::RenderProgress()
 
 	if (ProgressText && Loc)
 	{
-		ProgressText->SetText(FText::Format(
-			Loc->Get(TEXT("Inspection.Progress")),
-			FText::AsNumber(CorrectCount), FText::AsNumber(CorrectGoal)));
+		if (bUsePieceworkEconomy)
+		{
+			ProgressText->SetText(FText::FromString(FString::Printf(
+				TEXT("$%d / $%d   %d / %d"),
+				MoneyEarned - PendingRecallPenalty,
+				DailyQuota,
+				CurrentDollIndex,
+				DayDollTarget > 0 ? DayDollTarget : DollSequence.Num())));
+		}
+		else
+		{
+			ProgressText->SetText(FText::Format(
+				Loc->Get(TEXT("Inspection.Progress")),
+				FText::AsNumber(CorrectCount), FText::AsNumber(CorrectGoal)));
+		}
 	}
 	else if (ProgressText)
 	{
 		// fallback：没有 Loc subsystem 也要能跑
+		const FString PieceworkSuffix = bUsePieceworkEconomy
+			? FString::Printf(TEXT("  $%d / $%d"), MoneyEarned - PendingRecallPenalty, DailyQuota)
+			: FString();
 		ProgressText->SetText(FText::FromString(
-			FString::Printf(TEXT("%d / %d"), CorrectCount, CorrectGoal)));
+			FString::Printf(TEXT("%d / %d%s"), CorrectCount, CorrectGoal, *PieceworkSuffix)));
 	}
 
 	if (RemainingText && Loc)
@@ -1181,6 +1647,8 @@ void UInspectionScreen::RenderProgress()
 			Loc->Get(TEXT("Inspection.Remaining")),
 			FText::AsNumber(Remaining), FText::AsNumber(CurrentDollIndex), FText::AsNumber(WrongCount)));
 	}
+
+	RefreshScoreHud();
 }
 
 void UInspectionScreen::SetButtonsEnabled(bool bEnabled)
@@ -1329,7 +1797,7 @@ void UInspectionScreen::SpawnDeskCards()
 
 void UInspectionScreen::SpawnSelectedCardsBoard()
 {
-	if (!bShowSelectedCardsBoard || SelectedCardsBoardWidget || JudgmentCards.Num() == 0)
+	if (!bShowSelectedCardsBoard || SelectedCardsBoardWidget)
 	{
 		return;
 	}
@@ -1356,5 +1824,37 @@ void UInspectionScreen::ClearSelectedCardsBoard()
 	{
 		SelectedCardsBoardWidget->RemoveFromParent();
 		SelectedCardsBoardWidget = nullptr;
+	}
+}
+
+void UInspectionScreen::SpawnScoreHud()
+{
+	if (!bShowScoreHud || !bUsePieceworkEconomy || ScoreHudWidget)
+	{
+		return;
+	}
+
+	TSubclassOf<UCh1ScoreHudWidget> HudClass = ScoreHudWidgetClass;
+	if (!HudClass)
+	{
+		HudClass = UCh1ScoreHudWidget::StaticClass();
+	}
+
+	ScoreHudWidget = CreateWidget<UCh1ScoreHudWidget>(GetOwningPlayer(), HudClass);
+	if (!ScoreHudWidget)
+	{
+		return;
+	}
+
+	ScoreHudWidget->AddToViewport(/*ZOrder=*/90);
+	RefreshScoreHud();
+}
+
+void UInspectionScreen::ClearScoreHud()
+{
+	if (ScoreHudWidget)
+	{
+		ScoreHudWidget->RemoveFromParent();
+		ScoreHudWidget = nullptr;
 	}
 }

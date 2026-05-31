@@ -2,6 +2,8 @@
 
 #include "Ch2BeatPanelWidget.h"
 
+#include "CheckmateFonts.h"
+
 #include "Styling/CoreStyle.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -37,9 +39,9 @@ void UCh2BeatPanelWidget::StartDismiss()
 
 TSharedRef<SWidget> UCh2BeatPanelWidget::RebuildWidget()
 {
-	const FSlateFontInfo EyebrowFont = FCoreStyle::GetDefaultFontStyle("Regular", 14);
-	const FSlateFontInfo TitleFont = FCoreStyle::GetDefaultFontStyle("Bold", 38);
-	const FSlateFontInfo BodyFont = FCoreStyle::GetDefaultFontStyle("Regular", 18);
+	const FSlateFontInfo EyebrowFont = CheckmateFonts::BodyLight(14);
+	const FSlateFontInfo TitleFont = CheckmateFonts::Title(38);
+	const FSlateFontInfo BodyFont = CheckmateFonts::Body(18);
 
 	TSharedRef<SWidget> Root =
 		SNew(SOverlay)

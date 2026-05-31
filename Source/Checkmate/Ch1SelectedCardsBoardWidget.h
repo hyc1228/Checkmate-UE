@@ -29,6 +29,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Ch1|Selected Cards")
 	void SetCards(TArray<UCardData*> InCards);
 
+	UFUNCTION(BlueprintCallable, Category="Ch1|Selected Cards")
+	void PulseCards(const TArray<UCardData*>& TriggeredCards);
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
@@ -51,6 +54,7 @@ private:
 	FDelegateHandle LangChangedHandle;
 
 	TSharedRef<SWidget> BuildCardTray();
+	TSharedRef<SWidget> BuildBaseStandardsTray();
 	TSharedRef<SWidget> BuildCardSlot(UCardData* Card, int32 CardIndex, int32 VisibleCardCount);
 	FText BuildCardDetailText(const UCardData* Card) const;
 	FText BuildCardNameText(const UCardData* Card) const;

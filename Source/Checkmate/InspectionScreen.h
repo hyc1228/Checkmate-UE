@@ -17,6 +17,8 @@ class APostProcessVolume;
 class UMaterialInterface;
 class UMaterialInstanceDynamic;
 class UCh1SelectedCardsBoardWidget;
+class UCh1ScoreHudWidget;
+enum class EOutcomeClass : uint8;
 
 /**
  * 单班检验结果。班次结束时通过 OnShiftCompleted 广播给 GameMode。
@@ -40,6 +42,15 @@ struct FShiftResult
 
 	UPROPERTY(BlueprintReadOnly, Category="Shift")
 	int32 TrueRejectCount = 0;  // 正确丢弃（不合规且丢弃）
+
+	UPROPERTY(BlueprintReadOnly, Category="Shift|Piecework")
+	int32 MoneyEarned = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Shift|Piecework")
+	int32 DailyQuota = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Shift|Piecework")
+	bool bQuotaMet = true;
 
 	/** true = 班次成功；false = 班次失败（误判超上限）。 */
 	UPROPERTY(BlueprintReadOnly, Category="Shift")
@@ -153,7 +164,43 @@ public:
 
 	/** 累积误判到此数 → 班次失败（玩家会被回选卡屏）。0 = 永不失败。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Tuning", meta=(ClampMin="0"))
-	int32 MaxMisjudgmentsBeforeFail = 3;
+	int32 MaxMisjudgmentsBeforeFail = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework")
+	bool bUsePieceworkEconomy = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="1"))
+	int32 ShiftNumber = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 DailyQuota = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 DayDollTarget = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 BaseGoodPrice = 50;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 BaseRejectValue = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 FalsePositiveImmediateValue = 12;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 FalsePositiveRecallPenalty = 14;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 FalseNegativeDiscardPenalty = 25;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0"))
+	int32 MaxCombo = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework", meta=(ClampMin="0.0"))
+	float ComboValueStep = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Inspection|Piecework")
+	bool bTwistOnAnyVerdictForLastDoll = false;
 
 	// ── 反馈 juice 参数 ────────────────────────────────────────────────────
 
@@ -320,6 +367,10 @@ private:
 	int32 WrongCount = 0;
 	int32 TrueAcceptCount = 0;
 	int32 TrueRejectCount = 0;
+	int32 MoneyEarned = 0;
+	int32 PendingRecallPenalty = 0;
+	int32 ComboCount = 0;
+	int32 CorrectRejectStreak = 0;
 	bool bAwaitingNext = false;
 	bool bShiftEnded = false;
 	bool bQuotaFallbackLogged = false;
@@ -407,6 +458,15 @@ private:
 	UPROPERTY()
 	UCh1SelectedCardsBoardWidget* SelectedCardsBoardWidget = nullptr;
 
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|ScoreHud")
+	bool bShowScoreHud = true;
+
+	UPROPERTY(EditDefaultsOnly, Category="Inspection|ScoreHud")
+	TSubclassOf<UCh1ScoreHudWidget> ScoreHudWidgetClass;
+
+	UPROPERTY()
+	UCh1ScoreHudWidget* ScoreHudWidget = nullptr;
+
 	FTimerHandle AdvanceTimerHandle;
 	FTimerHandle DollTimeoutHandle;
 	FTimerHandle OpticalOverrideTimerHandle;
@@ -434,6 +494,13 @@ private:
 
 	void StartFeedback(bool bCorrect, bool bPlayerChosePass, bool bGroundTruthPass);
 	void PlayVerdictAudio(bool bCorrect, bool bPlayerChosePass);
+	int32 ScorePieceworkOutcome(EOutcomeClass Outcome, const UDollData* Doll);
+	int32 ComputeGoodSaleValue(const UDollData* Doll) const;
+	int32 ComputeCorrectRejectValue(const UDollData* Doll) const;
+	bool HasRecallExemptionCard() const;
+	TArray<UCardData*> CollectTriggeredScoreCards(EOutcomeClass Outcome, const UDollData* Doll) const;
+	void RefreshScoreHud();
+	void PlayScoreHudEvent(int32 NetMoneyDelta, float VisibleMultiplier);
 	void StartVerdictPostProcessFeedback(bool bCorrect);
 	void UpdateVerdictPostProcessFeedback(float DeltaSeconds);
 	void RestorePostProcessAfterVerdictFeedback();
@@ -456,6 +523,8 @@ private:
 	void UpdateDeskCardDrops(float DeltaSeconds);
 	void SpawnSelectedCardsBoard();
 	void ClearSelectedCardsBoard();
+	void SpawnScoreHud();
+	void ClearScoreHud();
 
 	/** 立即检查本班是否该终止（成功/失败）。返回 true 表示已 schedule 终止 broadcast。 */
 	bool CheckShiftTermination();

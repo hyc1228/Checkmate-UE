@@ -4,9 +4,14 @@
 
 #include "AudioService.h"
 #include "CardData.h"
+#include "Ch1CardTooltipWidget.h"
+#include "Ch1RoundedImageWidget.h"
 #include "CardSelectionScreen.h"
+#include "Blueprint/SlateBlueprintLibrary.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/TextBlock.h"
 #include "Engine/Texture2D.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -44,6 +49,8 @@ void UJudgmentCardWidget::NativeConstruct()
 	// 创建 CardImage 的 dynamic material instance
 	if (CardImage)
 	{
+		EnsureRoundedCardImage();
+
 		UMaterialInterface* BaseMat = CardImage->GetDynamicMaterial();
 		if (BaseMat)
 		{
@@ -58,6 +65,12 @@ void UJudgmentCardWidget::NativeConstruct()
 	}
 }
 
+void UJudgmentCardWidget::NativeDestruct()
+{
+	HideHoverTooltip();
+	Super::NativeDestruct();
+}
+
 void UJudgmentCardWidget::SetCardData(UCardData* InCardData)
 {
 	CardData = InCardData;
@@ -65,6 +78,7 @@ void UJudgmentCardWidget::SetCardData(UCardData* InCardData)
 
 	if (LabelText)
 	{
+		LabelText->SetVisibility(ESlateVisibility::Collapsed);
 		FString CompactLabel = CardData->DisplayLabel.ToString();
 		if (bUseCompactCardLabel)
 		{
@@ -84,8 +98,17 @@ void UJudgmentCardWidget::SetCardData(UCardData* InCardData)
 		UTexture2D* IconTex = CardData->IconTexture.IsNull() ? nullptr : CardData->IconTexture.LoadSynchronous();
 		if (IconTex)
 		{
-			CardImage->SetBrushFromTexture(IconTex, /*bMatchSize=*/false);
-			CardImage->SetColorAndOpacity(FLinearColor::White);
+			if (RoundedCardImage)
+			{
+				RoundedCardImage->SetTexture(IconTex);
+				RoundedCardImage->SetTintColor(FLinearColor::White);
+				RoundedCardImage->SetCornerRadius(CardCornerRadiusPx);
+			}
+			else
+			{
+				CardImage->SetBrushFromTexture(IconTex, /*bMatchSize=*/false);
+				CardImage->SetColorAndOpacity(FLinearColor::White);
+			}
 		}
 		else
 		{
@@ -103,19 +126,46 @@ void UJudgmentCardWidget::SetCardData(UCardData* InCardData)
 				Tint *= 1.25f;
 				Tint.A = 1.0f;
 			}
-			CardImage->SetColorAndOpacity(Tint);
+			if (RoundedCardImage)
+			{
+				RoundedCardImage->SetTexture(nullptr);
+				RoundedCardImage->SetTintColor(Tint);
+				RoundedCardImage->SetCornerRadius(CardCornerRadiusPx);
+			}
+			else
+			{
+				CardImage->SetColorAndOpacity(Tint);
+			}
 		}
 	}
 
 	if (CardMID)
 	{
+		const bool bHolographicFoil = CardData->bUseNegativeLaserFoil || CardData->CardColor == ECh1CardColor::Special;
+		const float FoilStrength = bHolographicFoil
+			? FMath::Max(0.86f, CardData->NegativeLaserVisualStrength)
+			: 0.0f;
 		CardMID->SetScalarParameterValue(
 			MaterialParam_HoloIntensity,
-			CardData->bIsPearlCompatible ? 1.0f : 0.0f
+			FMath::Max(CardData->bIsPearlCompatible ? 1.0f : 0.0f, FoilStrength)
 		);
 	}
 
+	if (RoundedCardImage)
+	{
+		const bool bHolographicFoil = CardData->bUseNegativeLaserFoil || CardData->CardColor == ECh1CardColor::Special;
+		const float FoilStrength = bHolographicFoil
+			? FMath::Max(0.86f, CardData->NegativeLaserVisualStrength)
+			: 0.0f;
+		RoundedCardImage->SetNegativeLaserEffect(FoilStrength, 0.0f);
+	}
+
 	OnCardDataChanged(CardData);
+
+	if (LabelText)
+	{
+		LabelText->SetVisibility(ESlateVisibility::Collapsed);
+	}
 }
 
 void UJudgmentCardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -127,8 +177,13 @@ void UJudgmentCardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 	CurrentLift = FMath::FInterpTo(CurrentLift, TargetLift, InDeltaTime, SmoothingSpeed);
 	CurrentScale = FMath::FInterpTo(CurrentScale, TargetScale, InDeltaTime, SmoothingSpeed);
 	TickOutro(InDeltaTime);
+	if (ScorePulseElapsed < ScorePulseDuration)
+	{
+		ScorePulseElapsed += InDeltaTime;
+	}
 
 	ApplyTiltToTransform();
+	UpdateHoverTooltipPosition();
 
 	// 推送参数到 material
 	if (CardMID)
@@ -136,6 +191,10 @@ void UJudgmentCardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 		CardMID->SetScalarParameterValue(MaterialParam_TiltX, CurrentTilt.X);
 		CardMID->SetScalarParameterValue(MaterialParam_TiltY, CurrentTilt.Y);
 		CardMID->SetScalarParameterValue(MaterialParam_HoverStrength, bIsHovered ? 1.0f : 0.0f);
+	}
+	if (RoundedCardImage)
+	{
+		RoundedCardImage->SetLaserTilt(CurrentTilt);
 	}
 
 	OnTiltUpdated(CurrentTilt, CurrentLift);
@@ -171,6 +230,7 @@ void UJudgmentCardWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const 
 	}
 
 	OnHoverStart();
+	ShowHoverTooltip();
 	OnCardHoverStarted.Broadcast(this);
 }
 
@@ -192,6 +252,7 @@ void UJudgmentCardWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
 	}
 
 	OnHoverEnd();
+	HideHoverTooltip();
 	OnCardHoverEnded.Broadcast(this);
 }
 
@@ -270,11 +331,18 @@ void UJudgmentCardWidget::SetInteractionLocked(bool bLocked)
 			}
 			bIsHovered = false;
 			OnHoverEnd();
+			HideHoverTooltip();
 		}
 		TargetTilt = FVector2D::ZeroVector;
 		TargetLift = ComputeTargetLift(bIsSelected, false, HoverLiftPixels, SelectedLiftPixels);
 		TargetScale = 1.0f;
 	}
+}
+
+void UJudgmentCardWidget::PlayScorePulse(float Strength)
+{
+	ScorePulseStrength = FMath::Clamp(Strength, 0.25f, 2.5f);
+	ScorePulseElapsed = 0.0f;
 }
 
 void UJudgmentCardWidget::PlaySelectionCommitDrop(int32 SelectionIndex, int32 TotalSelected, float DelaySeconds)
@@ -389,17 +457,102 @@ FVector2D UJudgmentCardWidget::CalculateNormalizedTilt(const FGeometry& InGeomet
 void UJudgmentCardWidget::ApplyTiltToTransform()
 {
 	FWidgetTransform Transform;
+	float PulseScale = 1.0f;
+	float PulseLift = 0.0f;
+	float PulseAngle = 0.0f;
+	if (ScorePulseElapsed < ScorePulseDuration)
+	{
+		const float T = FMath::Clamp(ScorePulseElapsed / FMath::Max(0.01f, ScorePulseDuration), 0.0f, 1.0f);
+		const float Pop = FMath::Sin(T * PI);
+		const float Shake = FMath::Sin(T * PI * 10.0f) * (1.0f - T);
+		PulseScale += Pop * 0.18f * ScorePulseStrength + Shake * 0.035f;
+		PulseLift = Pop * 28.0f * ScorePulseStrength;
+		PulseAngle = Shake * 7.0f * ScorePulseStrength;
+	}
 
-	Transform.Angle = BaseFanAngle + CurrentOutroAngleAdd + (-CurrentTilt.X * (MaxTiltAngleDegrees * 0.3f));
+	Transform.Angle = BaseFanAngle + CurrentOutroAngleAdd + PulseAngle + (-CurrentTilt.X * (MaxTiltAngleDegrees * 0.3f));
 	Transform.Shear = FVector2D(
 		-CurrentTilt.Y * MaxShearAmount,
 		-CurrentTilt.X * MaxShearAmount
 	);
-	Transform.Translation = FVector2D(0.0f, -CurrentLift) + CurrentOutroOffset;
-	Transform.Scale = FVector2D(CurrentScale * CurrentOutroScale, CurrentScale * CurrentOutroScale);
+	Transform.Translation = FVector2D(0.0f, -CurrentLift - PulseLift) + CurrentOutroOffset;
+	Transform.Scale = FVector2D(CurrentScale * CurrentOutroScale * PulseScale, CurrentScale * CurrentOutroScale * PulseScale);
 
 	SetRenderTransform(Transform);
 	SetRenderOpacity(CurrentOutroOpacity);
 	// 旋转 pivot 设在底部中心——扇形铺开时卡只绕底边旋转，所有底边保持对齐
 	SetRenderTransformPivot(FVector2D(0.5f, 1.0f));
+}
+
+void UJudgmentCardWidget::EnsureRoundedCardImage()
+{
+	if (RoundedCardImage || !CardImage)
+	{
+		return;
+	}
+
+	UOverlay* CardOverlay = Cast<UOverlay>(CardImage->GetParent());
+	if (!CardOverlay)
+	{
+		return;
+	}
+
+	RoundedCardImage = NewObject<UCh1RoundedImageWidget>(this);
+	if (!RoundedCardImage)
+	{
+		return;
+	}
+
+	RoundedCardImage->SetCornerRadius(CardCornerRadiusPx);
+	RoundedCardImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+	if (UOverlaySlot* RoundedSlot = CardOverlay->AddChildToOverlay(RoundedCardImage))
+	{
+		RoundedSlot->SetHorizontalAlignment(HAlign_Fill);
+		RoundedSlot->SetVerticalAlignment(VAlign_Fill);
+	}
+	CardImage->SetVisibility(ESlateVisibility::Collapsed);
+}
+
+void UJudgmentCardWidget::ShowHoverTooltip()
+{
+	if (!bShowNativeHoverTooltip || !CardData || ActiveTooltip)
+	{
+		return;
+	}
+
+	ActiveTooltip = CreateWidget<UCh1CardTooltipWidget>(GetOwningPlayer(), UCh1CardTooltipWidget::StaticClass());
+	if (!ActiveTooltip)
+	{
+		return;
+	}
+
+	ActiveTooltip->SetCardData(CardData);
+	ActiveTooltip->AddToViewport(/*ZOrder=*/5000);
+	UpdateHoverTooltipPosition();
+}
+
+void UJudgmentCardWidget::HideHoverTooltip()
+{
+	if (ActiveTooltip)
+	{
+		ActiveTooltip->RemoveFromParent();
+		ActiveTooltip = nullptr;
+	}
+}
+
+void UJudgmentCardWidget::UpdateHoverTooltipPosition()
+{
+	if (!ActiveTooltip)
+	{
+		return;
+	}
+
+	FVector2D PixelPosition;
+	FVector2D ViewportPosition;
+	USlateBlueprintLibrary::AbsoluteToViewport(
+		this,
+		GetCachedGeometry().GetAbsolutePosition(),
+		PixelPosition,
+		ViewportPosition);
+	ActiveTooltip->SetPositionInViewport(ViewportPosition + TooltipViewportOffset, false);
 }

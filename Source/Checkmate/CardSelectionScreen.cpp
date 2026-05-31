@@ -20,7 +20,7 @@
 void UCardSelectionScreen::SetShiftConfig(const TArray<UCardData*>& InPoolCards, int32 InK, float InAssemblyTimerSec)
 {
 	PoolCards = InPoolCards;
-	K = FMath::Max(1, InK);
+	K = InK > 0 ? 1 : 0;
 	AssemblyTimerSec = FMath::Max(1.0f, InAssemblyTimerSec);
 	TimeRemaining = AssemblyTimerSec;
 }
@@ -35,10 +35,25 @@ void UCardSelectionScreen::NativeConstruct()
 		return;
 	}
 
-	if (CardWidgetClass && PoolCards.Num() > 0)
+	DraftCards.Reset();
+	TArray<UCardData*> DrawBag = PoolCards;
+	DrawBag.RemoveAll([](const UCardData* Card)
 	{
-		// 先 spawn 所有卡
-		for (UCardData* CardData : PoolCards)
+		return Card == nullptr;
+	});
+
+	const int32 CardsToDeal = FMath::Min(FMath::Max(1, DraftOfferCount), DrawBag.Num());
+	for (int32 DealIdx = 0; DealIdx < CardsToDeal; ++DealIdx)
+	{
+		const int32 PickIdx = DrawBag.Num() > 1 ? FMath::RandRange(0, DrawBag.Num() - 1) : 0;
+		DraftCards.Add(DrawBag[PickIdx]);
+		DrawBag.RemoveAtSwap(PickIdx);
+	}
+
+	if (CardWidgetClass && DraftCards.Num() > 0)
+	{
+		// Deal only this draft's visible offer. Unpicked cards remain in the library.
+		for (UCardData* CardData : DraftCards)
 		{
 			if (!CardData) continue;
 
@@ -218,7 +233,7 @@ void UCardSelectionScreen::TickCountdown()
 	{
 		GetWorld()->GetTimerManager().ClearTimer(CountdownTimerHandle);
 
-		// 30s 到 → 用未选卡顺序补齐到 K
+		// 30s 到 → 自动拿第一张候选卡
 		for (UJudgmentCardWidget* Card : AllCardWidgets)
 		{
 			if (SelectedCards.Num() >= K) break;
@@ -241,16 +256,13 @@ void UCardSelectionScreen::HandleCardClicked(UJudgmentCardWidget* ClickedCard)
 	const int32 ExistingIdx = SelectedCards.IndexOfByKey(ClickedCard);
 	if (ExistingIdx != INDEX_NONE)
 	{
-		// 已选 → 取消
-		SelectedCards.RemoveAt(ExistingIdx);
-		ClickedCard->SetSelected(false);
+		return;
 	}
 	else
 	{
-		// 未选 → 加入（若未到 K）
+		// 未选 → 加入（single-pick draft）
 		if (SelectedCards.Num() >= K)
 		{
-			// 满了：忽略（也可考虑挤掉最早一张——Balatro 是直接拒绝，这里跟 Balatro）
 			return;
 		}
 		SelectedCards.Add(ClickedCard);
@@ -258,6 +270,10 @@ void UCardSelectionScreen::HandleCardClicked(UJudgmentCardWidget* ClickedCard)
 	}
 
 	RefreshConfirmEnabled();
+	if (bAutoCommitSinglePick && K == 1 && SelectedCards.Num() == 1)
+	{
+		OnBeginShiftClicked();
+	}
 }
 
 void UCardSelectionScreen::RefreshConfirmEnabled()

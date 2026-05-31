@@ -3,6 +3,7 @@
 #include "Ch1SelectedCardsBoardWidget.h"
 
 #include "CardData.h"
+#include "CheckmateFonts.h"
 #include "Ch1LocSubsystem.h"
 #include "JudgmentCardWidget.h"
 
@@ -42,6 +43,23 @@ void UCh1SelectedCardsBoardWidget::SetCards(TArray<UCardData*> InCards)
 
 	CurrentHoveredCard = nullptr;
 	HandleCardUnhovered();
+}
+
+void UCh1SelectedCardsBoardWidget::PulseCards(const TArray<UCardData*>& TriggeredCards)
+{
+	for (UJudgmentCardWidget* CardWidget : CardWidgets)
+	{
+		if (!CardWidget)
+		{
+			continue;
+		}
+
+		UCardData* Card = CardWidget->GetCardData();
+		if (TriggeredCards.Num() == 0 || TriggeredCards.Contains(Card))
+		{
+			CardWidget->PlayScorePulse(1.0f);
+		}
+	}
 }
 
 void UCh1SelectedCardsBoardWidget::NativeConstruct()
@@ -91,7 +109,7 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::RebuildWidget()
 					SNew(STextBlock)
 					.Text(FText::FromString(TEXT("|")))
 					.ColorAndOpacity(FLinearColor(0.30f, 0.24f, 0.18f, 1.0f))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
+					.Font(CheckmateFonts::BodyBold(22))
 				]
 				+ SHorizontalBox::Slot()
 				.FillWidth(1.0f)
@@ -100,7 +118,7 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::RebuildWidget()
 					SNew(STextBlock)
 					.Text(FText::FromString(TEXT("|")))
 					.ColorAndOpacity(FLinearColor(0.30f, 0.24f, 0.18f, 1.0f))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 22))
+					.Font(CheckmateFonts::BodyBold(22))
 				]
 			]
 
@@ -118,9 +136,9 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::RebuildWidget()
 					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
 					[
 						SAssignNew(TitleText, STextBlock)
-						.Text(LocText(TEXT("SelectedCardsBoard.Title"), TEXT("Selected cards")))
+						.Text(LocText(TEXT("SelectedCardsBoard.Title"), TEXT("Active standards")))
 						.ColorAndOpacity(FLinearColor(0.94f, 0.84f, 0.62f, 1.0f))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 17))
+						.Font(CheckmateFonts::Title(17))
 					]
 
 					+ SVerticalBox::Slot()
@@ -136,6 +154,11 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::RebuildWidget()
 
 TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::BuildCardTray()
 {
+	if (Cards.Num() == 0)
+	{
+		return BuildBaseStandardsTray();
+	}
+
 	const int32 VisibleCardCount = FMath::Min(Cards.Num(), 3);
 	TSharedRef<SCanvas> CardCanvas = SNew(SCanvas);
 
@@ -193,6 +216,61 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::BuildCardTray()
 	];
 }
 
+TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::BuildBaseStandardsTray()
+{
+	return SNew(SBox)
+	.WidthOverride(286.0f)
+	.HeightOverride(232.0f)
+	[
+		SNew(SBorder)
+		.BorderBackgroundColor(FLinearColor(0.055f, 0.045f, 0.036f, 0.88f))
+		.Padding(FMargin(14.0f, 14.0f))
+		[
+			SNew(SVerticalBox)
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 14.0f)
+			[
+				SNew(STextBlock)
+				.Text(LocText(TEXT("SelectedCardsBoard.BaseTitle"), TEXT("BASE STANDARD")))
+				.ColorAndOpacity(FLinearColor(0.98f, 0.88f, 0.58f, 1.0f))
+				.Font(CheckmateFonts::BodyBold(14))
+				.Justification(ETextJustify::Center)
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+			[
+				SNew(STextBlock)
+				.Text(LocText(TEXT("SelectedCardsBoard.BaseSmile"), TEXT("1. Must smile")))
+				.ColorAndOpacity(FLinearColor(0.94f, 0.90f, 0.80f, 1.0f))
+				.Font(CheckmateFonts::Body(13))
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+			[
+				SNew(STextBlock)
+				.Text(LocText(TEXT("SelectedCardsBoard.BasePose"), TEXT("2. Graceful pose")))
+				.ColorAndOpacity(FLinearColor(0.94f, 0.90f, 0.80f, 1.0f))
+				.Font(CheckmateFonts::Body(13))
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text(LocText(TEXT("SelectedCardsBoard.BaseHair"), TEXT("3. Natural hair color")))
+				.ColorAndOpacity(FLinearColor(0.94f, 0.90f, 0.80f, 1.0f))
+				.Font(CheckmateFonts::Body(13))
+			]
+		]
+	];
+}
+
 TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::BuildCardSlot(UCardData* Card, int32 CardIndex, int32 VisibleCardCount)
 {
 	const TWeakObjectPtr<UCh1SelectedCardsBoardWidget> WeakThis(this);
@@ -204,7 +282,7 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::BuildCardSlot(UCardData* Card,
 		SNew(STextBlock)
 		.Text(Card && !Card->DisplayLabel.IsEmpty() ? Card->DisplayLabel : FText::FromName(Card ? Card->CardId : NAME_None))
 		.ColorAndOpacity(FLinearColor(0.96f, 0.92f, 0.82f, 1.0f))
-		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+		.Font(CheckmateFonts::BodyBold(13))
 		.WrapTextAt(96.0f)
 	];
 
@@ -258,7 +336,7 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::BuildCardSlot(UCardData* Card,
 				return FText::GetEmpty();
 			})
 			.ColorAndOpacity(FLinearColor(0.98f, 0.88f, 0.58f, 1.0f))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+			.Font(CheckmateFonts::BodyBold(12))
 			.Justification(ETextJustify::Center)
 		]
 	]
@@ -310,7 +388,7 @@ TSharedRef<SWidget> UCh1SelectedCardsBoardWidget::BuildCardSlot(UCardData* Card,
 					return FText::GetEmpty();
 				})
 				.ColorAndOpacity(FLinearColor(0.90f, 0.86f, 0.76f, 1.0f))
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+				.Font(CheckmateFonts::BodyLight(10))
 				.Justification(ETextJustify::Center)
 				.WrapTextAt(108.0f)
 			]
@@ -464,7 +542,7 @@ void UCh1SelectedCardsBoardWidget::RefreshLocalizedTexts()
 {
 	if (TitleText)
 	{
-		TitleText->SetText(LocText(TEXT("SelectedCardsBoard.Title"), TEXT("Selected cards")));
+		TitleText->SetText(LocText(TEXT("SelectedCardsBoard.Title"), TEXT("Active standards")));
 	}
 }
 

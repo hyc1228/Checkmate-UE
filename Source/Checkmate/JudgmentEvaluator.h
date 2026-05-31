@@ -58,6 +58,15 @@ public:
 		FString& OutFailReason
 	);
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Judgment|Piecework")
+	static bool DollPassesBaseStandard(const UDollData* DollData, FString& OutFailReason);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Judgment|Piecework")
+	static bool DollMatchesCardCriterion(const UDollData* DollData, const UCardData* Card, FString& OutFailReason);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Judgment|Piecework")
+	static bool DollHasPieceworkTrait(const UDollData* DollData, FName TraitId);
+
 	/** 把玩家选择 + 客观结果分类成 4 outcome（FalsePos/FalseNeg 用于翻转 / 阈下反馈）。 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Judgment")
 	static EOutcomeClass ClassifyOutcome(

@@ -5,10 +5,13 @@
 #include "AudioService.h"
 #include "CardData.h"
 #include "CardSelectionScreen.h"
+#include "Ch1DeckReplacementWidget.h"
+#include "Ch1StarterStandardWidget.h"
 #include "Ch1LocSubsystem.h"
 #include "DollData.h"
 #include "DollDisplay.h"
 #include "InspectionScreen.h"
+#include "JudgmentEvaluator.h"
 
 #include "Blueprint/UserWidget.h"
 #include "Camera/CameraActor.h"
@@ -41,6 +44,47 @@ AChapter1GameMode::AChapter1GameMode()
 void AChapter1GameMode::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (ReplacementQuotaPressure == 35)
+	{
+		ReplacementQuotaPressure = 20;
+	}
+	if (QuotaFailurePressure == 45)
+	{
+		QuotaFailurePressure = 20;
+	}
+	if (FMath::IsNearlyEqual(MoneyQuotaPressureRate, 0.08f))
+	{
+		MoneyQuotaPressureRate = 0.04f;
+	}
+	if (FMath::IsNearlyEqual(EndlessQuotaGrowthRate, 1.16f))
+	{
+		EndlessQuotaGrowthRate = 1.12f;
+	}
+	if (EndlessQuotaLinearStep == 55)
+	{
+		EndlessQuotaLinearStep = 40;
+	}
+	if (FMath::IsNearlyEqual(DesiredObjectivePassDollRatio, 0.55f))
+	{
+		DesiredObjectivePassDollRatio = 0.68f;
+	}
+	if (MinObjectivePassDollsPerDay == 3)
+	{
+		MinObjectivePassDollsPerDay = 4;
+	}
+	if (RunMoneyToChapter2Threshold == 900)
+	{
+		RunMoneyToChapter2Threshold = 700;
+	}
+	if (FalsePositiveImmediateValue == 12)
+	{
+		FalsePositiveImmediateValue = 0;
+	}
+	if (FalsePositiveRecallPenalty == 14)
+	{
+		FalsePositiveRecallPenalty = 65;
+	}
 
 	UAudioService::PlayCueStatic(this, FName("Amb.Ch1"));
 
@@ -209,17 +253,25 @@ FCh1ProgressPanelPayload AChapter1GameMode::BuildProgressPanelPayload(int32 Shif
 	FCh1ProgressPanelPayload Payload;
 	Payload.ShiftIndex = ShiftIdx;
 	Payload.ShiftNumber = ShiftIdx + 1;
-	Payload.TotalShifts = FMath::Max(Shifts.Num(), 1);
+	Payload.TotalShifts = bUseEndlessRoguelikeRun ? 0 : FMath::Max(Shifts.Num(), 1);
 	Payload.Moment = Moment;
 
-	const FShiftConfig* Cfg = Shifts.IsValidIndex(ShiftIdx) ? &Shifts[ShiftIdx] : nullptr;
+	FShiftConfig RuntimeCfg;
+	const FShiftConfig* Cfg = nullptr;
+	if (Shifts.Num() > 0)
+	{
+		RuntimeCfg = BuildRuntimeShiftConfig(ShiftIdx);
+		Cfg = &RuntimeCfg;
+	}
 	if (Cfg && !Cfg->PanelEyebrow.IsEmpty())
 	{
 		Payload.Eyebrow = Cfg->PanelEyebrow;
 	}
 	else
 	{
-		Payload.Eyebrow = FText::FromString(FString::Printf(TEXT("DAY %02d / FACTORY FLOOR"), Payload.ShiftNumber));
+		Payload.Eyebrow = FText::FromString(FString::Printf(TEXT("DAY %02d / %s"),
+			Payload.ShiftNumber,
+			bUseEndlessRoguelikeRun ? TEXT("ENDLESS LINE") : TEXT("FACTORY FLOOR")));
 	}
 
 	if (Cfg && !Cfg->PanelTitle.IsEmpty())
@@ -240,7 +292,7 @@ FCh1ProgressPanelPayload AChapter1GameMode::BuildProgressPanelPayload(int32 Shif
 			Payload.Title = FText::FromString(TEXT("STANDARD ACCEPTED"));
 			break;
 		default:
-			Payload.Title = FText::FromString(FString::Printf(TEXT("SHIFT %02d"), Payload.ShiftNumber));
+			Payload.Title = FText::FromString(FString::Printf(TEXT("DAY %02d"), Payload.ShiftNumber));
 			break;
 		}
 	}
@@ -259,15 +311,28 @@ FCh1ProgressPanelPayload AChapter1GameMode::BuildProgressPanelPayload(int32 Shif
 	}
 	else
 	{
-		static const TCHAR* ShiftBodies[] =
+		if (bUseEndlessRoguelikeRun && Cfg)
 		{
-			TEXT("Assemble the standard. Keep the line clean."),
-			TEXT("The standard is now your choice."),
-			TEXT("Work faster. Let the edge of the rule show."),
-			TEXT("The standard may move while you are holding it.")
-		};
-		const int32 BodyIdx = FMath::Clamp(ShiftIdx, 0, static_cast<int32>(UE_ARRAY_COUNT(ShiftBodies)) - 1);
-		Payload.Body = FText::FromString(ShiftBodies[BodyIdx]);
+			Payload.Body = FText::FromString(FString::Printf(
+				TEXT("Quota $%d. Deck %d/%d. Replacement pressure %d, earnings pressure $%d."),
+				Cfg->DailyQuota,
+				CurrentDeckCards.Num(),
+				MaxDeckCards,
+				RunCardReplacementCount,
+				RunTotalMoneyEarned));
+		}
+		else
+		{
+			static const TCHAR* ShiftBodies[] =
+			{
+				TEXT("Assemble the standard. Keep the line clean."),
+				TEXT("The standard is now your choice."),
+				TEXT("Work faster. Let the edge of the rule show."),
+				TEXT("The standard may move while you are holding it.")
+			};
+			const int32 BodyIdx = FMath::Clamp(ShiftIdx, 0, static_cast<int32>(UE_ARRAY_COUNT(ShiftBodies)) - 1);
+			Payload.Body = FText::FromString(ShiftBodies[BodyIdx]);
+		}
 	}
 
 	if (Cfg && !Cfg->PanelCueId.IsNone())
@@ -456,22 +521,42 @@ void AChapter1GameMode::UpdateProgressPanelPostProcessCue(float DeltaSeconds)
 
 void AChapter1GameMode::BeginShift(int32 ShiftIdx)
 {
-	if (!Shifts.IsValidIndex(ShiftIdx))
+	bInspectionLaunchInProgress = false;
+
+	if (!Shifts.IsValidIndex(ShiftIdx) && !bUseEndlessRoguelikeRun)
 	{
 		FinishCh1();
 		return;
 	}
 
-	const FShiftConfig& Cfg = Shifts[ShiftIdx];
+	ActiveRuntimeShiftConfig = BuildRuntimeShiftConfig(ShiftIdx);
+	const FShiftConfig& Cfg = ActiveRuntimeShiftConfig;
 
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-	if (!PC) return;
+	if (!PC)
+	{
+		bInspectionLaunchInProgress = false;
+		return;
+	}
 
 	// 清掉过场（如有）
 	if (ActiveTransitionScreen)
 	{
 		ActiveTransitionScreen->RemoveFromParent();
 		ActiveTransitionScreen = nullptr;
+	}
+
+	if (Cfg.K <= 0)
+	{
+		if (!bStarterStandardSeen && CurrentDeckCards.Num() == 0)
+		{
+			ShowStarterStandardPanel();
+			return;
+		}
+
+		TArray<UCardData*> EmptySelection;
+		HandleCardsAssembled(EmptySelection);
+		return;
 	}
 
 	ActiveCardScreen = CreateWidget<UCardSelectionScreen>(PC, CardSelectionWidgetClass);
@@ -481,22 +566,80 @@ void AChapter1GameMode::BeginShift(int32 ShiftIdx)
 		return;
 	}
 
-	ActiveCardScreen->SetShiftConfig(Cfg.PoolCards, Cfg.K, Cfg.AssemblyTimerSec);
+	const TArray<UCardData*> DraftPool = BuildDraftPoolForShift(Cfg);
+	ActiveCardScreen->SetShiftConfig(DraftPool, Cfg.K, Cfg.AssemblyTimerSec);
 	ActiveCardScreen->OnAssemblyComplete.AddDynamic(this, &AChapter1GameMode::HandleCardsAssembled);
 	ActiveCardScreen->AddToViewport();
 
 	SetUIInputMode();
 
-	UE_LOG(LogTemp, Display, TEXT("Chapter1: Shift %d 开始 — Pool=%d, K=%d, DollTimeout=%.1fs"),
-		ShiftIdx + 1, Cfg.PoolCards.Num(), Cfg.K, Cfg.DollTimeoutSec);
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: Shift %d 开始 — Pool=%d, DraftPool=%d, Deck=%d, K=%d, DollTimeout=%.1fs"),
+		ShiftIdx + 1, Cfg.PoolCards.Num(), DraftPool.Num(), CurrentDeckCards.Num(), Cfg.K, Cfg.DollTimeoutSec);
+}
+
+void AChapter1GameMode::ShowStarterStandardPanel()
+{
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		TArray<UCardData*> EmptySelection;
+		HandleCardsAssembled(EmptySelection);
+		return;
+	}
+
+	if (ActiveStarterStandardScreen)
+	{
+		ActiveStarterStandardScreen->RemoveFromParent();
+		ActiveStarterStandardScreen = nullptr;
+	}
+
+	TSubclassOf<UCh1StarterStandardWidget> PanelClass = StarterStandardWidgetClass;
+	if (!PanelClass)
+	{
+		PanelClass = UCh1StarterStandardWidget::StaticClass();
+	}
+
+	ActiveStarterStandardScreen = CreateWidget<UCh1StarterStandardWidget>(PC, PanelClass);
+	if (!ActiveStarterStandardScreen)
+	{
+		TArray<UCardData*> EmptySelection;
+		HandleCardsAssembled(EmptySelection);
+		return;
+	}
+
+	ActiveStarterStandardScreen->OnConfirmed.AddDynamic(this, &AChapter1GameMode::HandleStarterStandardConfirmed);
+	ActiveStarterStandardScreen->AddToViewport(/*ZOrder=*/125);
+	SetUIInputMode();
+}
+
+void AChapter1GameMode::HandleStarterStandardConfirmed()
+{
+	if (bStarterStandardSeen || bInspectionLaunchInProgress || ActiveInspectionScreen)
+	{
+		return;
+	}
+
+	bStarterStandardSeen = true;
+
+	if (ActiveStarterStandardScreen)
+	{
+		ActiveStarterStandardScreen->OnConfirmed.RemoveAll(this);
+		ActiveStarterStandardScreen->RemoveFromParent();
+		ActiveStarterStandardScreen = nullptr;
+	}
+
+	TArray<UCardData*> EmptySelection;
+	HandleCardsAssembled(EmptySelection);
 }
 
 void AChapter1GameMode::HandleCardsAssembled(const TArray<UCardData*>& SelectedCards)
 {
-	const FShiftConfig& Cfg = Shifts[CurrentShiftIdx];
-
-	UE_LOG(LogTemp, Display, TEXT("Chapter1: Shift %d 卡选完成（%d 张）→ 进检验"),
-		CurrentShiftIdx + 1, SelectedCards.Num());
+	if (bInspectionLaunchInProgress || ActiveInspectionScreen)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Chapter1: duplicate inspection launch ignored for shift %d"), CurrentShiftIdx + 1);
+		return;
+	}
+	bInspectionLaunchInProgress = true;
 
 	if (ActiveCardScreen)
 	{
@@ -505,23 +648,315 @@ void AChapter1GameMode::HandleCardsAssembled(const TArray<UCardData*>& SelectedC
 		ActiveCardScreen = nullptr;
 	}
 
+	if (!ApplyDraftSelectionOrRequestReplacement(SelectedCards))
+	{
+		return;
+	}
+
+	LaunchInspectionForCurrentShift();
+	return;
+}
+
+bool AChapter1GameMode::ApplyDraftSelectionOrRequestReplacement(const TArray<UCardData*>& SelectedCards)
+{
+	PendingDraftCard = nullptr;
+	if (SelectedCards.Num() == 0)
+	{
+		LastSelectedCards = CurrentDeckCards;
+		return true;
+	}
+
+	UCardData* PickedCard = SelectedCards[0];
+	if (!PickedCard || CurrentDeckCards.Contains(PickedCard))
+	{
+		++RunDraftSkipCount;
+		LastSelectedCards = CurrentDeckCards;
+		return true;
+	}
+
+	if (CanAddCardToDeck(PickedCard))
+	{
+		AddCardToDeck(PickedCard);
+		LastSelectedCards = CurrentDeckCards;
+		return true;
+	}
+
+	const TArray<UCardData*> ReplacementCandidates = GetReplacementCandidates(PickedCard);
+	if (ReplacementCandidates.Num() == 0)
+	{
+		++RunDraftSkipCount;
+		UE_LOG(LogTemp, Warning, TEXT("Chapter1: picked card %s cannot fit and has no legal replacement; skipping."),
+			*PickedCard->GetName());
+		LastSelectedCards = CurrentDeckCards;
+		return true;
+	}
+
+	PendingDraftCard = PickedCard;
 	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-	if (!PC) return;
+	if (!PC)
+	{
+		bInspectionLaunchInProgress = false;
+		return false;
+	}
+
+	ClearDeckReplacementScreen();
+	TSubclassOf<UCh1DeckReplacementWidget> ReplacementClass = DeckReplacementWidgetClass;
+	if (!ReplacementClass)
+	{
+		ReplacementClass = UCh1DeckReplacementWidget::StaticClass();
+	}
+
+	ActiveDeckReplacementScreen = CreateWidget<UCh1DeckReplacementWidget>(PC, ReplacementClass);
+	if (!ActiveDeckReplacementScreen)
+	{
+		bInspectionLaunchInProgress = false;
+		return false;
+	}
+
+	ActiveDeckReplacementScreen->ConfigureReplacement(
+		PickedCard,
+		CurrentDeckCards,
+		ReplacementCandidates,
+		MaxDeckCards,
+		0);
+	ActiveDeckReplacementScreen->OnResolved.AddDynamic(this, &AChapter1GameMode::HandleDeckReplacementResolved);
+	ActiveDeckReplacementScreen->AddToViewport(/*ZOrder=*/130);
+	SetUIInputMode();
+
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: deck full; waiting for replacement before shift %d."),
+		CurrentShiftIdx + 1);
+	return false;
+}
+
+void AChapter1GameMode::HandleDeckReplacementResolved(UCardData* NewCard, UCardData* ReplacedCard)
+{
+	ClearDeckReplacementScreen();
+
+	if (NewCard && ReplacedCard && CurrentDeckCards.RemoveSingle(ReplacedCard) > 0)
+	{
+		CurrentDeckCards.AddUnique(NewCard);
+		++RunCardReplacementCount;
+		UE_LOG(LogTemp, Display, TEXT("Chapter1: replaced deck card %s -> %s; replacements=%d"),
+			*ReplacedCard->GetName(), *NewCard->GetName(), RunCardReplacementCount);
+	}
+	else
+	{
+		++RunDraftSkipCount;
+		UE_LOG(LogTemp, Display, TEXT("Chapter1: replacement skipped; skips=%d"), RunDraftSkipCount);
+	}
+
+	PendingDraftCard = nullptr;
+	LaunchInspectionForCurrentShift();
+}
+
+void AChapter1GameMode::ClearDeckReplacementScreen()
+{
+	if (ActiveDeckReplacementScreen)
+	{
+		ActiveDeckReplacementScreen->OnResolved.RemoveAll(this);
+		ActiveDeckReplacementScreen->RemoveFromParent();
+		ActiveDeckReplacementScreen = nullptr;
+	}
+}
+
+bool AChapter1GameMode::CanAddCardToDeck(UCardData* Card) const
+{
+	if (!Card)
+	{
+		return false;
+	}
+
+	const ECh1DeckSlot Slot = GetDeckSlot(Card);
+	if (CurrentDeckCards.Num() >= MaxDeckCards)
+	{
+		return false;
+	}
+
+	return CountDeckSlot(Slot) < GetUnlockedSlotCap(Slot, CurrentShiftIdx);
+}
+
+void AChapter1GameMode::AddCardToDeck(UCardData* Card)
+{
+	if (Card)
+	{
+		CurrentDeckCards.AddUnique(Card);
+	}
+}
+
+TArray<UCardData*> AChapter1GameMode::GetReplacementCandidates(UCardData* NewCard) const
+{
+	TArray<UCardData*> Candidates;
+	if (!NewCard)
+	{
+		return Candidates;
+	}
+
+	for (UCardData* ExistingCard : CurrentDeckCards)
+	{
+		if (!ExistingCard)
+		{
+			continue;
+		}
+
+		TArray<UCardData*> SimulatedDeck = CurrentDeckCards;
+		SimulatedDeck.RemoveSingle(ExistingCard);
+
+		int32 SimTotal = SimulatedDeck.Num() + 1;
+		int32 SimRed = 0;
+		int32 SimBlack = 0;
+		for (const UCardData* Card : SimulatedDeck)
+		{
+			if (GetDeckSlot(Card) == ECh1DeckSlot::Red)
+			{
+				++SimRed;
+			}
+			else if (GetDeckSlot(Card) == ECh1DeckSlot::Black)
+			{
+				++SimBlack;
+			}
+		}
+		if (GetDeckSlot(NewCard) == ECh1DeckSlot::Red)
+		{
+			++SimRed;
+		}
+		else if (GetDeckSlot(NewCard) == ECh1DeckSlot::Black)
+		{
+			++SimBlack;
+		}
+
+		const bool bFitsTotal = SimTotal <= MaxDeckCards;
+		const bool bFitsRed = SimRed <= GetUnlockedSlotCap(ECh1DeckSlot::Red, CurrentShiftIdx);
+		const bool bFitsBlack = SimBlack <= GetUnlockedSlotCap(ECh1DeckSlot::Black, CurrentShiftIdx);
+		if (bFitsTotal && bFitsRed && bFitsBlack)
+		{
+			Candidates.Add(ExistingCard);
+		}
+	}
+
+	return Candidates;
+}
+
+ECh1DeckSlot AChapter1GameMode::GetDeckSlot(const UCardData* Card) const
+{
+	if (!Card)
+	{
+		return ECh1DeckSlot::Neutral;
+	}
+
+	if (Card->PieceworkEffect == ECh1CardEffect::SwordAndSerpent)
+	{
+		return ECh1DeckSlot::Red;
+	}
+	if (Card->PieceworkEffect == ECh1CardEffect::QueenGambit
+		|| Card->PieceworkEffect == ECh1CardEffect::CheckmateDiscard)
+	{
+		return ECh1DeckSlot::Black;
+	}
+
+	if (Card->CardColor == ECh1CardColor::RedBonus)
+	{
+		return ECh1DeckSlot::Red;
+	}
+	if (Card->CardColor == ECh1CardColor::BlackCriterion)
+	{
+		return ECh1DeckSlot::Black;
+	}
+	return ECh1DeckSlot::Neutral;
+}
+
+int32 AChapter1GameMode::CountDeckSlot(ECh1DeckSlot Slot) const
+{
+	if (Slot == ECh1DeckSlot::Neutral)
+	{
+		return 0;
+	}
+
+	int32 Count = 0;
+	for (const UCardData* Card : CurrentDeckCards)
+	{
+		if (GetDeckSlot(Card) == Slot)
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+int32 AChapter1GameMode::GetUnlockedSlotCap(ECh1DeckSlot Slot, int32 ShiftIdx) const
+{
+	if (Slot == ECh1DeckSlot::Neutral)
+	{
+		return MaxDeckCards;
+	}
+
+	if (!bUseEndlessRoguelikeRun)
+	{
+		return Slot == ECh1DeckSlot::Red ? MaxRedCards : MaxBlackCards;
+	}
+
+	const int32 DayNumber = ShiftIdx + 1;
+	if (DayNumber <= 1)
+	{
+		return 0;
+	}
+	if (DayNumber == 2)
+	{
+		return 1;
+	}
+	if (DayNumber == 3)
+	{
+		return Slot == ECh1DeckSlot::Red ? FMath::Min(2, MaxRedCards) : FMath::Min(1, MaxBlackCards);
+	}
+	return Slot == ECh1DeckSlot::Red ? MaxRedCards : MaxBlackCards;
+}
+
+void AChapter1GameMode::LaunchInspectionForCurrentShift()
+{
+	const FShiftConfig& Cfg = ActiveRuntimeShiftConfig;
+	LastSelectedCards = CurrentDeckCards;
+
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: Shift %d deck locked (%d cards) -> inspection"),
+		CurrentShiftIdx + 1, LastSelectedCards.Num());
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC)
+	{
+		bInspectionLaunchInProgress = false;
+		return;
+	}
 
 	ActiveInspectionScreen = CreateWidget<UInspectionScreen>(PC, InspectionWidgetClass);
-	if (!ActiveInspectionScreen) return;
+	if (!ActiveInspectionScreen)
+	{
+		bInspectionLaunchInProgress = false;
+		return;
+	}
 
-	ActiveInspectionScreen->SetShiftData(SelectedCards, Cfg.DollSequence);
+	const int32 TargetDollCount = Cfg.DayDollTarget > 0 ? Cfg.DayDollTarget : Cfg.DollSequence.Num();
+	const TArray<UDollData*> InspectionDollSequence = BuildBalancedInspectionDollSequence(
+		Cfg.DollSequence,
+		LastSelectedCards,
+		TargetDollCount);
+
+	ActiveInspectionScreen->SetShiftData(LastSelectedCards, InspectionDollSequence);
 	ActiveInspectionScreen->DollTimeoutSec = Cfg.DollTimeoutSec;
 	ActiveInspectionScreen->CorrectGoal = Cfg.CorrectGoal;
 	ActiveInspectionScreen->PassQuota = Cfg.PassQuota;
 	ActiveInspectionScreen->RejectQuota = Cfg.RejectQuota;
-	ActiveInspectionScreen->MaxMisjudgmentsBeforeFail = Cfg.MaxMisjudgmentsBeforeFail;
+	ActiveInspectionScreen->MaxMisjudgmentsBeforeFail = 0;
+	ActiveInspectionScreen->bUsePieceworkEconomy = bUsePieceworkEconomyFlow && Cfg.bUsePieceworkEconomy;
+	ActiveInspectionScreen->ShiftNumber = CurrentShiftIdx + 1;
+	ActiveInspectionScreen->DailyQuota = Cfg.DailyQuota;
+	ActiveInspectionScreen->DayDollTarget = TargetDollCount > 0 ? TargetDollCount : InspectionDollSequence.Num();
+	ActiveInspectionScreen->BaseGoodPrice = Cfg.BaseGoodPrice;
+	ActiveInspectionScreen->BaseRejectValue = Cfg.BaseRejectValue;
+	ActiveInspectionScreen->FalsePositiveImmediateValue = FalsePositiveImmediateValue;
+	ActiveInspectionScreen->FalsePositiveRecallPenalty = FalsePositiveRecallPenalty;
+	ActiveInspectionScreen->FalseNegativeDiscardPenalty = FalseNegativeDiscardPenalty;
 	ActiveInspectionScreen->OnShiftCompleted.AddDynamic(this, &AChapter1GameMode::HandleShiftCompleted);
 	ActiveInspectionScreen->OnMisjudgmentRecorded.AddDynamic(this, &AChapter1GameMode::HandleMisjudgmentRecorded);
 	ActiveInspectionScreen->AddToViewport();
 
-	// Spawn 3D 娃娃 actor（一班一只，复用到下一班）
 	if (DollActorClass && !ActiveDollActor)
 	{
 		FActorSpawnParameters Params;
@@ -536,21 +971,301 @@ void AChapter1GameMode::HandleCardsAssembled(const TArray<UCardData*>& SelectedC
 	else
 	{
 		UE_LOG(LogTemp, Warning,
-			TEXT("Chapter1GameMode: DollActorClass 未填或 spawn 失败——检验屏会缺 3D 交互"));
+			TEXT("Chapter1GameMode: DollActorClass is unset or failed to spawn; inspection falls back to UI-only."));
 	}
 
-	// 3D 拖拽需要同时收键鼠和 UI 事件
-	APlayerController* PC2 = UGameplayStatics::GetPlayerController(this, 0);
-	if (PC2)
+	PC->bShowMouseCursor = true;
+	PC->bEnableClickEvents = true;
+	PC->bEnableMouseOverEvents = true;
+	FInputModeGameAndUI Mode;
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	Mode.SetHideCursorDuringCapture(false);
+	PC->SetInputMode(Mode);
+}
+
+FShiftConfig AChapter1GameMode::BuildRuntimeShiftConfig(int32 ShiftIdx) const
+{
+	FShiftConfig RuntimeCfg;
+	if (Shifts.Num() == 0)
 	{
-		PC2->bShowMouseCursor = true;
-		PC2->bEnableClickEvents = true;
-		PC2->bEnableMouseOverEvents = true;
-		FInputModeGameAndUI Mode;
-		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-		Mode.SetHideCursorDuringCapture(false);
-		PC2->SetInputMode(Mode);
+		return RuntimeCfg;
 	}
+
+	const int32 SourceIdx = Shifts.IsValidIndex(ShiftIdx)
+		? ShiftIdx
+		: FMath::Max(0, Shifts.Num() - 1);
+	RuntimeCfg = Shifts[SourceIdx];
+
+	if (bUseEndlessRoguelikeRun)
+	{
+		RuntimeCfg.PoolCards = BuildRoguelikeCardPool(ShiftIdx);
+		RuntimeCfg.K = ShiftIdx <= 0 ? RuntimeCfg.K : 1;
+		RuntimeCfg.PassQuota = 0;
+		RuntimeCfg.RejectQuota = 0;
+		RuntimeCfg.MaxMisjudgmentsBeforeFail = 0;
+		RuntimeCfg.bUsePieceworkEconomy = true;
+		RuntimeCfg.DailyQuota = ComputeDailyQuota(RuntimeCfg, ShiftIdx);
+		RuntimeCfg.DayDollTarget = ComputeDayDollTarget(RuntimeCfg, ShiftIdx);
+
+		const int32 ExtraDays = FMath::Max(0, ShiftIdx - (Shifts.Num() - 1));
+		if (ExtraDays > 0 && RuntimeCfg.DollTimeoutSec > 0.0f)
+		{
+			RuntimeCfg.DollTimeoutSec = FMath::Max(4.5f, RuntimeCfg.DollTimeoutSec - ExtraDays * 0.15f);
+		}
+	}
+	else
+	{
+		RuntimeCfg.DailyQuota = RuntimeCfg.DailyQuota > 0
+			? RuntimeCfg.DailyQuota
+			: ComputeDailyQuota(RuntimeCfg, ShiftIdx);
+		RuntimeCfg.DayDollTarget = RuntimeCfg.DayDollTarget > 0
+			? RuntimeCfg.DayDollTarget
+			: ComputeDayDollTarget(RuntimeCfg, ShiftIdx);
+	}
+
+	return RuntimeCfg;
+}
+
+TArray<UCardData*> AChapter1GameMode::BuildRoguelikeCardPool(int32 ShiftIdx) const
+{
+	TArray<UCardData*> Pool;
+	const int32 MaxSourceShift = FMath::Min(ShiftIdx, Shifts.Num() - 1);
+	for (int32 Index = 0; Index <= MaxSourceShift; ++Index)
+	{
+		if (!Shifts.IsValidIndex(Index))
+		{
+			continue;
+		}
+		for (UCardData* Card : Shifts[Index].PoolCards)
+		{
+			if (Card)
+			{
+				Pool.AddUnique(Card);
+			}
+		}
+	}
+
+	if (bUseEndlessRoguelikeRun && ShiftIdx >= Shifts.Num())
+	{
+		for (const FShiftConfig& Shift : Shifts)
+		{
+			for (UCardData* Card : Shift.PoolCards)
+			{
+				if (Card)
+				{
+					Pool.AddUnique(Card);
+				}
+			}
+		}
+	}
+
+	if (Pool.Num() == 0)
+	{
+		for (const FShiftConfig& Shift : Shifts)
+		{
+			for (UCardData* Card : Shift.PoolCards)
+			{
+				if (Card)
+				{
+					Pool.AddUnique(Card);
+				}
+			}
+		}
+	}
+
+	return Pool;
+}
+
+bool AChapter1GameMode::DoesDollPassActiveCards(const UDollData* Doll, const TArray<UCardData*>& ActiveCards) const
+{
+	if (!Doll)
+	{
+		return false;
+	}
+
+	FString FailReason;
+	return UJudgmentEvaluator::EvaluateDoll(ActiveCards, Doll, FailReason) == EJudgmentVerdict::Pass;
+}
+
+TArray<UDollData*> AChapter1GameMode::BuildBalancedInspectionDollSequence(
+	const TArray<UDollData*>& SourceSequence,
+	const TArray<UCardData*>& ActiveCards,
+	int32 TargetCount) const
+{
+	TArray<UDollData*> CleanSource;
+	CleanSource.Reserve(SourceSequence.Num());
+	for (UDollData* Doll : SourceSequence)
+	{
+		if (Doll)
+		{
+			CleanSource.Add(Doll);
+		}
+	}
+
+	const int32 ResolvedTargetCount = TargetCount > 0 ? TargetCount : CleanSource.Num();
+	if (!bUsePieceworkEconomyFlow
+		|| !bRebalanceDollSequenceForPiecework
+		|| CleanSource.Num() == 0
+		|| ResolvedTargetCount <= 0)
+	{
+		return CleanSource;
+	}
+
+	TArray<UDollData*> ObjectivePassDolls;
+	TArray<UDollData*> ObjectiveRejectDolls;
+	for (UDollData* Doll : CleanSource)
+	{
+		if (DoesDollPassActiveCards(Doll, ActiveCards))
+		{
+			ObjectivePassDolls.Add(Doll);
+		}
+		else
+		{
+			ObjectiveRejectDolls.Add(Doll);
+		}
+	}
+
+	if (ObjectivePassDolls.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Chapter1: cannot rebalance dolls for day %d; no source doll passes the active criteria."),
+			CurrentShiftIdx + 1);
+		return CleanSource;
+	}
+
+	int32 DesiredPassCount = FMath::RoundToInt(ResolvedTargetCount * DesiredObjectivePassDollRatio);
+	DesiredPassCount = FMath::Max(DesiredPassCount, FMath::Min(MinObjectivePassDollsPerDay, ResolvedTargetCount));
+	if (ObjectiveRejectDolls.Num() > 0)
+	{
+		const int32 DesiredRejectFloor = FMath::Min(MinObjectiveRejectDollsPerDay, FMath::Max(0, ResolvedTargetCount - 1));
+		DesiredPassCount = FMath::Min(DesiredPassCount, ResolvedTargetCount - DesiredRejectFloor);
+	}
+	DesiredPassCount = FMath::Clamp(DesiredPassCount, 1, ResolvedTargetCount);
+	const int32 DesiredRejectCount = ResolvedTargetCount - DesiredPassCount;
+
+	TArray<UDollData*> Result;
+	Result.Reserve(ResolvedTargetCount);
+	int32 PassCursor = CurrentShiftIdx % ObjectivePassDolls.Num();
+	int32 RejectCursor = ObjectiveRejectDolls.Num() > 0 ? CurrentShiftIdx % ObjectiveRejectDolls.Num() : 0;
+	int32 PassUsed = 0;
+	int32 RejectUsed = 0;
+
+	while (Result.Num() < ResolvedTargetCount)
+	{
+		const int32 PassRemaining = DesiredPassCount - PassUsed;
+		const int32 RejectRemaining = DesiredRejectCount - RejectUsed;
+
+		bool bTakePass = PassRemaining > 0;
+		if (ObjectiveRejectDolls.Num() > 0 && PassRemaining > 0 && RejectRemaining > 0)
+		{
+			const float PassProgress = DesiredPassCount > 0
+				? static_cast<float>(PassUsed) / static_cast<float>(DesiredPassCount)
+				: 1.0f;
+			const float RejectProgress = DesiredRejectCount > 0
+				? static_cast<float>(RejectUsed) / static_cast<float>(DesiredRejectCount)
+				: 1.0f;
+			bTakePass = PassProgress <= RejectProgress;
+		}
+
+		if (bTakePass)
+		{
+			Result.Add(ObjectivePassDolls[PassCursor % ObjectivePassDolls.Num()]);
+			++PassCursor;
+			++PassUsed;
+		}
+		else if (ObjectiveRejectDolls.Num() > 0)
+		{
+			Result.Add(ObjectiveRejectDolls[RejectCursor % ObjectiveRejectDolls.Num()]);
+			++RejectCursor;
+			++RejectUsed;
+		}
+		else
+		{
+			Result.Add(ObjectivePassDolls[PassCursor % ObjectivePassDolls.Num()]);
+			++PassCursor;
+			++PassUsed;
+		}
+	}
+
+	UE_LOG(LogTemp, Display,
+		TEXT("Chapter1: balanced dolls day %d sourcePass=%d/%d finalPass=%d/%d targetRatio=%.2f"),
+		CurrentShiftIdx + 1,
+		ObjectivePassDolls.Num(),
+		CleanSource.Num(),
+		DesiredPassCount,
+		ResolvedTargetCount,
+		DesiredObjectivePassDollRatio);
+
+	return Result;
+}
+
+int32 AChapter1GameMode::ComputeDailyQuota(const FShiftConfig& BaseCfg, int32 ShiftIdx) const
+{
+	if (BaseCfg.DailyQuota > 0 && (!bUseEndlessRoguelikeRun || Shifts.IsValidIndex(ShiftIdx)))
+	{
+		return BaseCfg.DailyQuota
+			+ RunCardReplacementCount * ReplacementQuotaPressure
+			+ RunQuotaFailureCount * QuotaFailurePressure
+			+ FMath::RoundToInt(FMath::Max(0, RunTotalMoneyEarned) * MoneyQuotaPressureRate);
+	}
+
+	static const int32 BaseQuotas[] = { 0, 100, 180, 320, 460, 620, 820, 1050 };
+	const int32 CurveIdx = FMath::Clamp(ShiftIdx, 0, static_cast<int32>(UE_ARRAY_COUNT(BaseQuotas)) - 1);
+	int32 Quota = BaseQuotas[CurveIdx];
+	if (ShiftIdx >= static_cast<int32>(UE_ARRAY_COUNT(BaseQuotas)))
+	{
+		const int32 ExtraDays = ShiftIdx - static_cast<int32>(UE_ARRAY_COUNT(BaseQuotas)) + 1;
+		Quota = FMath::RoundToInt(BaseQuotas[UE_ARRAY_COUNT(BaseQuotas) - 1] * FMath::Pow(EndlessQuotaGrowthRate, ExtraDays))
+			+ ExtraDays * EndlessQuotaLinearStep;
+	}
+
+	const int32 ReplacementPressure = RunCardReplacementCount * ReplacementQuotaPressure;
+	const int32 FailurePressure = RunQuotaFailureCount * QuotaFailurePressure;
+	const int32 MoneyPressure = FMath::RoundToInt(FMath::Max(0, RunTotalMoneyEarned) * MoneyQuotaPressureRate);
+	return FMath::Max(0, Quota + ReplacementPressure + FailurePressure + MoneyPressure);
+}
+
+int32 AChapter1GameMode::ComputeDayDollTarget(const FShiftConfig& BaseCfg, int32 ShiftIdx) const
+{
+	if (BaseCfg.DayDollTarget > 0 && (!bUseEndlessRoguelikeRun || Shifts.IsValidIndex(ShiftIdx)))
+	{
+		return BaseCfg.DayDollTarget;
+	}
+
+	static const int32 BaseTargets[] = { 6, 8, 10, 12, 14, 15 };
+	const int32 CurveIdx = FMath::Clamp(ShiftIdx, 0, static_cast<int32>(UE_ARRAY_COUNT(BaseTargets)) - 1);
+	int32 Target = BaseTargets[CurveIdx];
+	if (ShiftIdx >= static_cast<int32>(UE_ARRAY_COUNT(BaseTargets)))
+	{
+		const int32 ExtraDays = ShiftIdx - static_cast<int32>(UE_ARRAY_COUNT(BaseTargets)) + 1;
+		Target += ExtraDays / 2;
+	}
+	return FMath::Clamp(Target, 1, MaxEndlessDollTarget);
+}
+
+TArray<UCardData*> AChapter1GameMode::BuildDraftPoolForShift(const FShiftConfig& Cfg) const
+{
+	TArray<UCardData*> DraftPool;
+	for (UCardData* Card : Cfg.PoolCards)
+	{
+		if (Card && !CurrentDeckCards.Contains(Card))
+		{
+			DraftPool.Add(Card);
+		}
+	}
+
+	if (DraftPool.Num() == 0)
+	{
+		for (UCardData* Card : Cfg.PoolCards)
+		{
+			if (Card)
+			{
+				DraftPool.Add(Card);
+			}
+		}
+	}
+
+	return DraftPool;
 }
 
 void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
@@ -566,10 +1281,74 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 		ActiveInspectionScreen->RemoveFromParent();
 		ActiveInspectionScreen = nullptr;
 	}
+	bInspectionLaunchInProgress = false;
+	RunTotalMoneyEarned += FMath::Max(0, Result.MoneyEarned);
+	if (!Result.bSuccess)
+	{
+		++RunQuotaFailureCount;
+	}
+	const bool bRunMoneyGoalMet = bAdvanceToChapter2OnMoneyGoal
+		&& RunMoneyToChapter2Threshold > 0
+		&& RunTotalMoneyEarned >= RunMoneyToChapter2Threshold;
+	const bool bCheckmateBurstMet = bAdvanceToChapter2OnCheckmateBurst
+		&& HasSelectedCheckmateCard()
+		&& Result.MoneyEarned >= CheckmateBurstDayMoneyThreshold;
 
 	// 班次失败现在进入死亡分支，不再回选卡屏重试。
 	if (!Result.bSuccess)
+	if (!Result.bSuccess)
 	{
+		if (bUsePieceworkEconomyFlow && bCheckmateBurstMet)
+		{
+			UE_LOG(LogTemp, Display,
+				TEXT("Chapter1: checkmate burst advances to Ch2 after quota miss. DayMoney=%d Threshold=%d RunMoney=%d"),
+				Result.MoneyEarned, CheckmateBurstDayMoneyThreshold, RunTotalMoneyEarned);
+			TriggerChapter2Transition(FName("Checkmate"), /*bQuotaMet=*/false);
+			return;
+		}
+
+		if (bUsePieceworkEconomyFlow && bAdvanceToChapter2OnQuotaMiss)
+		{
+			UE_LOG(LogTemp, Display,
+				TEXT("Chapter1: quota miss advances to Ch2. DayMoney=%d Quota=%d RunMoney=%d Goal=%d"),
+				Result.MoneyEarned, Result.DailyQuota, RunTotalMoneyEarned, RunMoneyToChapter2Threshold);
+			TriggerChapter2Transition(FName("QuotaMiss"), /*bQuotaMet=*/false);
+			return;
+		}
+
+		if (bUseEndlessRoguelikeRun)
+		{
+			const int32 NextIdx = CurrentShiftIdx + 1;
+			UE_LOG(LogTemp, Display,
+				TEXT("Chapter1: quota missed $%d / $%d; endless run continues to day %d. failurePressure=%d"),
+				Result.MoneyEarned, Result.DailyQuota, NextIdx + 1, RunQuotaFailureCount);
+			UAudioService::PlayCueStatic(this, FName("Ch1.Wrong"), 0.55f);
+			ShowShiftTransition(NextIdx);
+			return;
+		}
+
+		if (bUsePieceworkEconomyFlow && !bQuotaCollapseActive)
+		{
+			if (bRequireBridgeCardBeforeCollapse && !HasSelectedBridgeCard())
+			{
+				const int32 NextIdx = CurrentShiftIdx + 1;
+				UE_LOG(LogTemp, Warning,
+					TEXT("Chapter1: quota failed before any bridge card was selected; continuing to shift %d instead of entering Ch2."),
+					NextIdx + 1);
+				if (Shifts.IsValidIndex(NextIdx))
+				{
+					UAudioService::PlayCueStatic(this, FName("Ch1.ShiftPass"));
+					ShowShiftTransition(NextIdx);
+					return;
+				}
+			}
+
+			UE_LOG(LogTemp, Display, TEXT("Chapter1: quota collapse $%d / $%d; forcing D05 verdict"),
+				Result.MoneyEarned, Result.DailyQuota);
+			StartQuotaCollapseInspection();
+			return;
+		}
+
 		TriggerDeathCinematic();
 		return;
 	}
@@ -579,8 +1358,25 @@ void AChapter1GameMode::HandleShiftCompleted(FShiftResult Result)
 		return;
 	}
 
+	if (bUsePieceworkEconomyFlow && bRunMoneyGoalMet)
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("Chapter1: money goal advances to Ch2. RunMoney=%d Goal=%d"),
+			RunTotalMoneyEarned, RunMoneyToChapter2Threshold);
+		TriggerChapter2Transition(FName("MoneyGoal"), /*bQuotaMet=*/true);
+		return;
+	}
+	if (bUsePieceworkEconomyFlow && bCheckmateBurstMet)
+	{
+		UE_LOG(LogTemp, Display,
+			TEXT("Chapter1: checkmate burst advances to Ch2. DayMoney=%d Threshold=%d RunMoney=%d"),
+			Result.MoneyEarned, CheckmateBurstDayMoneyThreshold, RunTotalMoneyEarned);
+		TriggerChapter2Transition(FName("Checkmate"), /*bQuotaMet=*/Result.bQuotaMet);
+		return;
+	}
+
 	const int32 NextIdx = CurrentShiftIdx + 1;
-	if (Shifts.IsValidIndex(NextIdx))
+	if (Shifts.IsValidIndex(NextIdx) || bUseEndlessRoguelikeRun)
 	{
 		UAudioService::PlayCueStatic(this, FName("Ch1.ShiftPass"));
 		ShowShiftTransition(NextIdx);
@@ -601,6 +1397,11 @@ void AChapter1GameMode::HandleMisjudgmentRecorded(int32 ShiftMisjudgments, int32
 	TotalMisjudgmentsThisChapter++;
 	UE_LOG(LogTemp, Display, TEXT("Chapter1: Misjudgment total=%d shift=%d wrong=%d threshold=%d"),
 		TotalMisjudgmentsThisChapter, ShiftMisjudgments, ShiftWrongCount, ChapterDeathMisjudgmentThreshold);
+
+	if (bUsePieceworkEconomyFlow)
+	{
+		return;
+	}
 
 	if (ChapterDeathMisjudgmentThreshold > 0
 		&& TotalMisjudgmentsThisChapter >= ChapterDeathMisjudgmentThreshold)
@@ -777,25 +1578,196 @@ void AChapter1GameMode::ShowShiftTransition(int32 NextShiftIdx)
 		FMath::Max(0.5f, TransitionHoldSeconds), false);
 }
 
+void AChapter1GameMode::StartQuotaCollapseInspection()
+{
+	if (bTwistTriggered)
+	{
+		return;
+	}
+
+	bQuotaCollapseActive = true;
+	UDollData* CollapseDoll = ForcedCollapseDoll ? ForcedCollapseDoll : FindFallbackCollapseDoll();
+	if (!CollapseDoll)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Chapter1: no collapse doll configured; triggering twist directly"));
+		RequestTwist();
+		return;
+	}
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+	if (!PC || !InspectionWidgetClass)
+	{
+		RequestTwist();
+		return;
+	}
+
+	TriggerPresentationCue(FName("Ch1.PanelTwistLeadIn"), CurrentShiftIdx + 1, ECh1ProgressPanelMoment::TwistLeadIn, true);
+
+	TArray<UDollData*> CollapseSequence;
+	CollapseSequence.Add(CollapseDoll);
+
+	ActiveInspectionScreen = CreateWidget<UInspectionScreen>(PC, InspectionWidgetClass);
+	if (!ActiveInspectionScreen)
+	{
+		RequestTwist();
+		return;
+	}
+
+	ActiveInspectionScreen->SetShiftData(LastSelectedCards, CollapseSequence);
+	ActiveInspectionScreen->DollTimeoutSec = 0.0f;
+	ActiveInspectionScreen->CorrectGoal = 1;
+	ActiveInspectionScreen->PassQuota = 0;
+	ActiveInspectionScreen->RejectQuota = 0;
+	ActiveInspectionScreen->MaxMisjudgmentsBeforeFail = 0;
+	ActiveInspectionScreen->bUsePieceworkEconomy = false;
+	ActiveInspectionScreen->ShiftNumber = CurrentShiftIdx + 1;
+	ActiveInspectionScreen->bTwistOnAnyVerdictForLastDoll = true;
+	ActiveInspectionScreen->OnShiftCompleted.AddDynamic(this, &AChapter1GameMode::HandleShiftCompleted);
+	ActiveInspectionScreen->OnMisjudgmentRecorded.AddDynamic(this, &AChapter1GameMode::HandleMisjudgmentRecorded);
+	ActiveInspectionScreen->AddToViewport();
+
+	if (DollActorClass && !ActiveDollActor)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ActiveDollActor = GetWorld()->SpawnActor<ADollDisplay>(
+			DollActorClass, DollSpawnTransform, Params);
+	}
+	if (ActiveDollActor)
+	{
+		ActiveInspectionScreen->SetDollActor(ActiveDollActor);
+	}
+
+	PC->bShowMouseCursor = true;
+	PC->bEnableClickEvents = true;
+	PC->bEnableMouseOverEvents = true;
+	FInputModeGameAndUI Mode;
+	Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	Mode.SetHideCursorDuringCapture(false);
+	PC->SetInputMode(Mode);
+}
+
+UDollData* AChapter1GameMode::FindFallbackCollapseDoll() const
+{
+	for (const FShiftConfig& Shift : Shifts)
+	{
+		for (UDollData* Doll : Shift.DollSequence)
+		{
+			if (Doll && Doll->bIsTwistTrigger)
+			{
+				return Doll;
+			}
+		}
+	}
+
+	for (const FShiftConfig& Shift : Shifts)
+	{
+		for (UDollData* Doll : Shift.DollSequence)
+		{
+			if (Doll && Doll->ButtonStyle == EButtonEyeStyle::Pearl)
+			{
+				return Doll;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+bool AChapter1GameMode::HasSelectedBridgeCard() const
+{
+	for (const UCardData* Card : LastSelectedCards)
+	{
+		if (!Card)
+		{
+			continue;
+		}
+
+		if (Card->PieceworkEffect == ECh1CardEffect::SwordAndSerpent
+			|| Card->PieceworkEffect == ECh1CardEffect::QueenGambit
+			|| Card->PieceworkEffect == ECh1CardEffect::CheckmateDiscard)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool AChapter1GameMode::HasSelectedCheckmateCard() const
+{
+	for (const UCardData* Card : LastSelectedCards)
+	{
+		if (Card && Card->PieceworkEffect == ECh1CardEffect::CheckmateDiscard)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 void AChapter1GameMode::FinishCh1()
 {
 	UE_LOG(LogTemp, Display, TEXT("Chapter1: 全部 %d 班完成 — Ch1 结束"), Shifts.Num());
 	// 走完所有班次仍未触发 twist（玩家从未放行 Pearl 完美娃娃）→ 兜底也跳 Ch2
-	if (!bTwistTriggered)
+	if (!bTwistTriggered && (!bRequireBridgeCardBeforeCollapse || HasSelectedBridgeCard()))
 	{
 		RequestTwist();
 	}
+	else if (!bTwistTriggered)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Chapter1: finished without a selected bridge card; Ch2 transition is blocked by bRequireBridgeCardBeforeCollapse."));
+	}
+}
+
+void AChapter1GameMode::TriggerChapter2Transition(FName Reason, bool bQuotaMet)
+{
+	if (bTwistTriggered)
+	{
+		return;
+	}
+
+	PendingChapter2TransitionReason = Reason.IsNone() ? FName("Chapter2") : Reason;
+	K2_OnChapter2TransitionReason(PendingChapter2TransitionReason, RunTotalMoneyEarned, RunMoneyToChapter2Threshold, bQuotaMet);
+
+	bForceAllowChapter2Transition = true;
+	RequestTwist();
+	bForceAllowChapter2Transition = false;
+	PendingChapter2TransitionReason = NAME_None;
 }
 
 void AChapter1GameMode::RequestTwist()
 {
-	if (bTwistTriggered) return;  // 防重入
+	if (bTwistTriggered)
+	{
+		return;
+	}
+	if (!bForceAllowChapter2Transition && bUseEndlessRoguelikeRun && bBlockAutomaticTwistInEndlessRun)
+	{
+		UE_LOG(LogTemp, Display, TEXT("Chapter1: automatic Ch2 twist blocked by endless roguelike run mode."));
+		return;
+	}
+	if (!bForceAllowChapter2Transition && bRequireBridgeCardBeforeCollapse && !HasSelectedBridgeCard())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Chapter1: Ch2 transition blocked; no bridge card has been selected yet."));
+		return;
+	}
+
 	bTwistTriggered = true;
 
-	UE_LOG(LogTemp, Display, TEXT("Chapter1: ★ Twist triggered — Ch1→Ch2 翻转拍点"));
+	UE_LOG(LogTemp, Display, TEXT("Chapter1: ★ Twist triggered — Ch1→Ch2 reason=%s"),
+		PendingChapter2TransitionReason.IsNone() ? TEXT("Default") : *PendingChapter2TransitionReason.ToString());
 
 	// 音频：翻转专属 cue；没绑 Native/FMOD 时 AudioService 会静默 fallback。
-	TriggerPresentationCue(FName("Ch1.PanelTwistLeadIn"), CurrentShiftIdx + 1, ECh1ProgressPanelMoment::TwistLeadIn, true);
+	FName LeadInCue = FName("Ch1.PanelTwistLeadIn");
+	if (PendingChapter2TransitionReason == FName("QuotaMiss"))
+	{
+		LeadInCue = FName("Ch1.QuotaMissToCh2");
+	}
+	else if (PendingChapter2TransitionReason == FName("MoneyGoal"))
+	{
+		LeadInCue = FName("Ch1.MoneyGoalToCh2");
+	}
+	TriggerPresentationCue(LeadInCue, CurrentShiftIdx + 1, ECh1ProgressPanelMoment::TwistLeadIn, true);
 	UAudioService::PlayCueStatic(this, FName("Twist.DroneAscent"), 0.8f);
 	UAudioService::PlayCueStatic(this, FName("Twist.PearlEye"));
 

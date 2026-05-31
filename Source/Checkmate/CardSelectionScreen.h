@@ -20,12 +20,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAssemblyComplete, const TArray<UC
  * 班次开始时的卡选界面（Balatro 风：扇形铺开，点选 K 张，Confirm）。
  *
  * 工作流：
- *   1. NativeConstruct 时按 PoolCards 数组 spawn N 个 UJudgmentCardWidget 到 CardPoolContainer
+ *   1. NativeConstruct 时从 PoolCards 抽 3 张候选，spawn 到 CardPoolContainer
  *   2. 启动 30s 倒计时
- *   3. 玩家点卡 → card 调 HandleCardClicked → 切换选中（永久浮起）
- *   4. Selected.Num() == K → ConfirmButton 可点
- *   5. 30s 到 → 用未选卡顺序补齐到 K，强制开始
- *   6. 玩家按 ConfirmButton → 触发 OnAssemblyComplete delegate（携带 K 张选中卡）
+ *   3. 玩家点卡 → card 调 HandleCardClicked → 选中 1 张并自动提交
+ *   4. 30s 到 → 自动拿第一张候选卡
+ *   5. 提交动画：选中卡进入卡组，其他候选飞回卡池
  *
  * WBP 子类 (`WBP_CardSelectionScreen`) 必须提供这些命名 widget：
  *   - CardPoolContainer (UPanelWidget) —— 卡铺开的容器
@@ -44,7 +43,7 @@ class CHECKMATE_API UCardSelectionScreen : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** 班次开始前由调用方设置。N = PoolCards.Num()。 */
+	/** 班次开始前由调用方设置。屏幕会从 PoolCards 抽取 DraftOfferCount 张候选。 */
 	UFUNCTION(BlueprintCallable, Category="CardSelection")
 	void SetShiftConfig(const TArray<UCardData*>& InPoolCards, int32 InK, float InAssemblyTimerSec);
 
@@ -83,6 +82,14 @@ public:
 	/** 单张卡渲染高度（像素）。同时设 WBP_JudgmentCard 里 SizeBox 一致。 */
 	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Fan", meta=(ClampMin="60.0"))
 	float CardHeight = 256.0f;
+
+	/** How many cards are dealt from the library for each draft. */
+	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Draft", meta=(ClampMin="1", ClampMax="5"))
+	int32 DraftOfferCount = 3;
+
+	/** Single-pick drafts should commit as soon as the player clicks a card. */
+	UPROPERTY(EditDefaultsOnly, Category="CardSelection|Draft")
+	bool bAutoCommitSinglePick = true;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -149,6 +156,9 @@ protected:
 private:
 	UPROPERTY()
 	TArray<UCardData*> PoolCards;
+
+	UPROPERTY()
+	TArray<UCardData*> DraftCards;
 
 	int32 K = 3;
 	float AssemblyTimerSec = 30.0f;

@@ -6,6 +6,8 @@
 #include "Engine/DataAsset.h"
 #include "DollData.generated.h"
 
+class USkeletalMesh;
+
 /**
  * 娃娃眼睛 / 按扣的视觉签名（视觉锚点；eye-state GDD §8）。
  *   Pearl   : 经典珍珠按扣眼（默认）
@@ -20,6 +22,8 @@ enum class EButtonEyeStyle : uint8
 	Pearl    UMETA(DisplayName="Pearl"),
 	Bell     UMETA(DisplayName="Bell"),
 	VeilPin  UMETA(DisplayName="VeilPin"),
+	Heart    UMETA(DisplayName="Heart"),
+	Rose     UMETA(DisplayName="Rose"),
 };
 
 /**
@@ -69,6 +73,53 @@ public:
 	/** 多值：珍珠项链 / 头纱 / 围裙 / 缎带 / 白手套 的子集。 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Attributes")
 	TSet<FName> AccessoryTraits;
+
+	/** Use these explicit fields for the Ch1 piecework rewrite. When false, code derives them from the legacy trait sets. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework")
+	bool bUseExplicitPieceworkTraits = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bSmile = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bPoseConforming = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bNaturalColor = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bLongHair = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bStyled = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bPearlNecklace = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bVeil = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bApron = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bRibbon = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bWhiteGloves = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bTearful = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bRoseAdornment = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Piecework", meta=(EditCondition="bUseExplicitPieceworkTraits"))
+	bool bHighHeels = false;
+
+	/** Optional bound hair skeletal mesh. Uses the same skeleton as the Ch1 doll body; hair color is driven at runtime. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Doll|Visual")
+	USkeletalMesh* HairMesh = nullptr;
 
 	// ── 视觉签名 + 翻转触发 ─────────────────────────────────────────────────
 
